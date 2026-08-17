@@ -1,0 +1,35 @@
+name: Refresh universe
+
+on:
+  schedule:
+    # ~23:00 UTC — after US market close, early morning in Thailand. GitHub Actions cron
+    # timing is best-effort and can slip; don't build logic that assumes exact timing.
+    - cron: "0 23 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: refresh-universe
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    # Generous but bounded — a Yahoo-side slowdown or a wedged retry loop shouldn't run forever.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run refresh
+        env:
+          # Unpooled connection — a long batch job shouldn't compete with the app's pooled
+          # connection slots. Set this repo secret to your production Postgres (Neon/Prisma
+          # Postgres) once deployed; the local `prisma dev` URL used in development won't
+          # resolve from a GitHub-hosted runner.
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}

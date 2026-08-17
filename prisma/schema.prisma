@@ -1,0 +1,238 @@
+// akeguru — Prisma schema
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Market {
+  TH
+  US
+}
+
+enum PeriodType {
+  ANNUAL
+  QUARTERLY
+}
+
+enum RefreshStatus {
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+model User {
+  id             String          @id @default(cuid())
+  name           String?
+  email          String          @unique
+  emailVerified  DateTime?
+  image          String?
+  passwordHash   String?
+  createdAt      DateTime        @default(now())
+  watchlistItems WatchlistItem[]
+  notes          Note[]
+  deepReports    DeepReport[]
+}
+
+model Stock {
+  id       String  @id @default(cuid())
+  ticker   String  @unique
+  market   Market
+  exchange String
+  name     String
+  sector   String?
+  industry String?
+  currency String? // defaulted from `market` at ingestion time (TH -> THB, US -> USD); should never be null in practice
+  description String? @db.Text
+
+  // Price / size (native currency)
+  price             Float?
+  priceChangePct1d  Float?
+  marketCap         Float?
+  marketCapUsd      Float? // marketCap converted at refresh-time FX rate — use this (not marketCap) for cross-market screener sort/filter
+  fxRateToUsd       Float? // 1.0 for US tickers; THB->USD rate captured at refresh time for TH tickers
+  sharesOutstanding Float?
+  fiftyTwoWeekHigh  Float?
+  fiftyTwoWeekLow   Float?
+  beta              Float?
+
+  // Raw absolute figures (avoid back-computing from ratios, which breaks when a ratio is null e.g. negative earnings)
+  epsTtm            Float?
+  bookValuePerShare Float?
+  revenueTtm        Float?
+  totalCash         Float?
+
+  // Value
+  peRatio    Float?
+  forwardPe  Float?
+  pbRatio    Float?
+  psRatio    Float?
+  evToEbitda Float?
+
+  // Growth (analyst estimates) — sparse for TH tickers, see ScoreSnapshot "limited data" handling
+  estEarningsGrowth Float?
+  estRevenueGrowth  Float?
+
+  // Analyst coverage
+  analystTargetPrice Float?
+  recommendationMean Float?
+  numAnalystOpinions Int?
+
+  // Profitability
+  roe             Float?
+  roa             Float?
+  grossMargin     Float?
+  operatingMargin Float?
+  netMargin       Float?
+
+  // Financial health
+  debtToEquity     Float?
+  currentRatio     Float?
+  quickRatio       Float?
+  interestCoverage Float?
+
+  // Dividend (dividendYield is written as 0, not null, when the provider confirms "no dividend" — null is reserved for "unknown")
+  dividendYield Float?
+  payoutRatio   Float?
+
+  // Ownership
+  heldPercentInsiders     Float?
+  heldPercentInstitutions Float?
+  floatShares             Float?
+
+  // Denormalized latest score (avoids a greatest-n-per-group query against ScoreSnapshot for the screener)
+  latestOverallScore  Float?
+  latestValueScore    Float?
+  latestFutureScore   Float?
+  latestPastScore     Float?
+  latestHealthScore   Float?
+  latestDividendScore Float?
+  latestMomentumScore Float? // not part of the 5-petal Snowflake radar; used by the configurable-weight screener ranking
+  latestScoreDate     DateTime?
+
+  isActive      Boolean   @default(true)
+  lastFetchedAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  financialHistory FinancialHistory[]
+  priceHistory     PriceHistory[]
+  scoreSnapshots   ScoreSnapshot[]
+  watchlistItems   WatchlistItem[]
+  deepReports      DeepReport[]
+
+  @@index([market])
+  @@index([sector])
+  @@index([isActive])
+}
+
+model FinancialHistory {
+  id               String     @id @default(cuid())
+  stockId          String
+  stock            Stock      @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  period           String
+  periodType       PeriodType
+  fiscalDateEnding DateTime
+  revenue          Float?
+  netIncome        Float?
+  eps              Float?
+  freeCashFlow     Float?
+  totalDebt        Float?
+  totalEquity      Float?
+  createdAt        DateTime   @default(now())
+
+  @@unique([stockId, period, periodType])
+}
+
+// One row per stock per refresh day. Cheap (~250 rows/day) daily-close log — not full OHLC/intraday —
+// captured as insurance for momentum scoring and future price-chart needs, since history can't be backfilled later.
+model PriceHistory {
+  id        String   @id @default(cuid())
+  stockId   String
+  stock     Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  date      DateTime
+  close     Float
+  createdAt DateTime @default(now())
+
+  @@unique([stockId, date])
+  @@index([date])
+}
+
+model ScoreSnapshot {
+  id             String   @id @default(cuid())
+  stockId        String
+  stock          Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  date           DateTime
+  valueScore     Float?
+  futureScore    Float?
+  pastScore      Float?
+  healthScore    Float?
+  dividendScore  Float?
+  momentumScore  Float? // price-based, from PriceHistory; not one of the 5 Snowflake petals
+  overallScore   Float?
+  // Per metric: { value, percentile }. Per dimension: { availableCount, totalCount } for "limited data" UI badges.
+  rawMetricsJson Json?
+  createdAt      DateTime @default(now())
+
+  @@unique([stockId, date])
+  @@index([date])
+}
+
+model WatchlistItem {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stockId     String
+  stock       Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  notes       String?
+  targetPrice Float?
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, stockId])
+}
+
+model RefreshLog {
+  id               String        @id @default(cuid())
+  startedAt        DateTime      @default(now())
+  finishedAt       DateTime?
+  status           RefreshStatus
+  tickersProcessed Int           @default(0)
+  tickersFailed    Int           @default(0)
+  errorSummary     String?
+}
+
+// Personal notes synced in from a local Obsidian vault via a manually-run local script
+// (the vault itself is never reachable from the deployed/cloud app). Feeds DeepReport generation.
+model Note {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticker     String? // best-effort match to a Stock.ticker; nullable since not every note is stock-specific
+  title      String
+  content    String   @db.Text
+  sourcePath String // original path within the vault, used to dedupe/update on re-sync
+  syncedAt   DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, sourcePath])
+  @@index([userId, ticker])
+}
+
+// AI-generated ("deep report") synthesis for one stock, combining cached fundamentals + the user's own Notes.
+model DeepReport {
+  id        String   @id @default(cuid())
+  stockId   String
+  stock     Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   String   @db.Text
+  model     String // which Claude model generated this report
+  createdAt DateTime @default(now())
+
+  @@index([stockId, userId])
+}
