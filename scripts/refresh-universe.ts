@@ -18,7 +18,8 @@ import { scoreCohort, type ScorableStock } from "../lib/scoring";
 // Prisma client against the DIRECT (unpooled) connection, mirroring lib/prisma.ts's adapter
 // setup rather than sharing it, since a long batch job shouldn't compete with the app's
 // pooled connection slots.
-const pool = new pg.Pool({ connectionString: process.env.DIRECT_URL });
+// See prisma.config.ts for why DATABASE_URL_UNPOOLED is a fallback (Vercel's Neon integration).
+const pool = new pg.Pool({ connectionString: process.env.DIRECT_URL ?? process.env.DATABASE_URL_UNPOOLED });
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 
 const CONCURRENCY = 5;
