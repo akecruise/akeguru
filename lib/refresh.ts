@@ -156,33 +156,54 @@ async function refreshTicker(
   }
 
   if (fetched.price != null) {
-    const years = await withRetry(() => fetchFinancialHistory(ticker), `fundamentalsTimeSeries(${ticker})`);
-    for (const year of years) {
-      await prisma.financialHistory.upsert({
-        where: { stockId_period_periodType: { stockId: stock.id, period: year.period, periodType: "ANNUAL" } },
-        create: {
-          stockId: stock.id,
-          period: year.period,
-          periodType: "ANNUAL",
-          fiscalDateEnding: year.fiscalDateEnding,
-          revenue: year.revenue,
-          netIncome: year.netIncome,
-          eps: year.eps,
-          freeCashFlow: year.freeCashFlow,
-          totalDebt: year.totalDebt,
-          totalEquity: year.totalEquity,
-        },
-        update: {
-          fiscalDateEnding: year.fiscalDateEnding,
-          ...(year.revenue != null && { revenue: year.revenue }),
-          ...(year.netIncome != null && { netIncome: year.netIncome }),
-          ...(year.eps != null && { eps: year.eps }),
-          ...(year.freeCashFlow != null && { freeCashFlow: year.freeCashFlow }),
-          ...(year.totalDebt != null && { totalDebt: year.totalDebt }),
-          ...(year.totalEquity != null && { totalEquity: year.totalEquity }),
-        },
-      });
+    const years = await withRetry(() => fetchFinancialHistory(ticker, "annual"), `fundamentalsTimeSeries(${ticker}, annual)`);
+    await upsertFinancialHistory(prisma, stock.id, "ANNUAL", years);
+
+    try {
+      const quarters = await withRetry(
+        () => fetchFinancialHistory(ticker, "quarterly"),
+        `fundamentalsTimeSeries(${ticker}, quarterly)`,
+      );
+      await upsertFinancialHistory(prisma, stock.id, "QUARTERLY", quarters);
+    } catch (err) {
+      // Quarterly data is a nice-to-have on top of annual — don't fail the whole ticker refresh
+      // over it (some tickers, especially thinly-covered TH ones, simply lack quarterly detail).
+      console.warn(`[refresh] quarterly financials failed for ${ticker}: ${(err as Error).message}`);
     }
+  }
+}
+
+async function upsertFinancialHistory(
+  prisma: PrismaClient,
+  stockId: string,
+  periodType: "ANNUAL" | "QUARTERLY",
+  periods: Awaited<ReturnType<typeof fetchFinancialHistory>>,
+): Promise<void> {
+  for (const period of periods) {
+    await prisma.financialHistory.upsert({
+      where: { stockId_period_periodType: { stockId, period: period.period, periodType } },
+      create: {
+        stockId,
+        period: period.period,
+        periodType,
+        fiscalDateEnding: period.fiscalDateEnding,
+        revenue: period.revenue,
+        netIncome: period.netIncome,
+        eps: period.eps,
+        freeCashFlow: period.freeCashFlow,
+        totalDebt: period.totalDebt,
+        totalEquity: period.totalEquity,
+      },
+      update: {
+        fiscalDateEnding: period.fiscalDateEnding,
+        ...(period.revenue != null && { revenue: period.revenue }),
+        ...(period.netIncome != null && { netIncome: period.netIncome }),
+        ...(period.eps != null && { eps: period.eps }),
+        ...(period.freeCashFlow != null && { freeCashFlow: period.freeCashFlow }),
+        ...(period.totalDebt != null && { totalDebt: period.totalDebt }),
+        ...(period.totalEquity != null && { totalEquity: period.totalEquity }),
+      },
+    });
   }
 }
 

@@ -69,8 +69,7 @@ export default async function StockPage({
     where: { ticker },
     include: {
       financialHistory: {
-        where: { periodType: "ANNUAL" },
-        orderBy: { period: "asc" },
+        orderBy: { fiscalDateEnding: "asc" },
       },
       scoreSnapshots: {
         orderBy: { date: "desc" },
@@ -83,6 +82,10 @@ export default async function StockPage({
 
   const rawMetrics = stock.scoreSnapshots[0]?.rawMetricsJson as unknown as RawMetrics | undefined;
   const dims = rawMetrics?.dimensions;
+
+  const annualHistory = stock.financialHistory.filter((h) => h.periodType === "ANNUAL");
+  // Last 8 quarters (2 years) is plenty for a trend table — older quarterly rows just clutter it.
+  const quarterlyHistory = stock.financialHistory.filter((h) => h.periodType === "QUARTERLY").slice(-8);
 
   const staleDays = stock.lastFetchedAt
     ? Math.floor((Date.now() - stock.lastFetchedAt.getTime()) / (1000 * 60 * 60 * 24))
@@ -227,7 +230,7 @@ export default async function StockPage({
         </div>
       </section>
 
-      {stock.financialHistory.length > 0 && (
+      {annualHistory.length > 0 && (
         <section className="mt-8">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-black/50 dark:text-white/50">
             Financial History (Annual)
@@ -244,13 +247,45 @@ export default async function StockPage({
                 </tr>
               </thead>
               <tbody>
-                {stock.financialHistory.map((year) => (
+                {annualHistory.map((year) => (
                   <tr key={year.id} className="border-b border-black/5 dark:border-white/10">
                     <td className="py-2 pr-4">{year.period}</td>
                     <td className="py-2 pr-4">{fmtCompact(year.revenue)}</td>
                     <td className="py-2 pr-4">{fmtCompact(year.netIncome)}</td>
                     <td className="py-2 pr-4">{fmtNum(year.eps, { maximumFractionDigits: 2 })}</td>
                     <td className="py-2 pr-4">{fmtCompact(year.freeCashFlow)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {quarterlyHistory.length > 0 && (
+        <section className="mt-8">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-black/50 dark:text-white/50">
+            Financial History (Quarterly)
+          </h2>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-sm tabular-nums">
+              <thead>
+                <tr className="border-b border-black/10 dark:border-white/15 text-left text-black/50 dark:text-white/50">
+                  <th className="py-2 pr-4 font-medium">Quarter</th>
+                  <th className="py-2 pr-4 font-medium">Revenue</th>
+                  <th className="py-2 pr-4 font-medium">Net Income</th>
+                  <th className="py-2 pr-4 font-medium">EPS</th>
+                  <th className="py-2 pr-4 font-medium">Free Cash Flow</th>
+                </tr>
+              </thead>
+              <tbody>
+                {quarterlyHistory.map((quarter) => (
+                  <tr key={quarter.id} className="border-b border-black/5 dark:border-white/10">
+                    <td className="py-2 pr-4">{quarter.period}</td>
+                    <td className="py-2 pr-4">{fmtCompact(quarter.revenue)}</td>
+                    <td className="py-2 pr-4">{fmtCompact(quarter.netIncome)}</td>
+                    <td className="py-2 pr-4">{fmtNum(quarter.eps, { maximumFractionDigits: 2 })}</td>
+                    <td className="py-2 pr-4">{fmtCompact(quarter.freeCashFlow)}</td>
                   </tr>
                 ))}
               </tbody>

@@ -143,12 +143,18 @@ export interface FetchedFinancialYear {
   totalEquity: number | null;
 }
 
-export async function fetchFinancialHistory(ticker: string): Promise<FetchedFinancialYear[]> {
+/** Yahoo returns field names with the type ("annual"/"quarterly") stripped off already
+ *  (e.g. both types yield `totalRevenue`, not `annualTotalRevenue`/`quarterlyTotalRevenue`)
+ *  — verified against yahoo-finance2's own field-name-stripping logic, not assumed. */
+export async function fetchFinancialHistory(
+  ticker: string,
+  type: "annual" | "quarterly" = "annual",
+): Promise<FetchedFinancialYear[]> {
   // Since late 2024 the quoteSummary income/balance/cashflow-statement modules return
   // almost nothing — fundamentalsTimeSeries is the module that still has real data.
   const rows = await yahooFinance.fundamentalsTimeSeries(ticker, {
     period1: "2018-01-01",
-    type: "annual",
+    type,
     module: "all",
   });
 
@@ -157,7 +163,7 @@ export async function fetchFinancialHistory(ticker: string): Promise<FetchedFina
     .map((row) => {
       const r = row as Record<string, unknown>;
       return {
-        period: String(row.date.getFullYear()),
+        period: type === "annual" ? String(row.date.getFullYear()) : quarterLabel(row.date),
         fiscalDateEnding: row.date,
         revenue: numOrNull(r.totalRevenue),
         netIncome: numOrNull(r.netIncome),
@@ -168,6 +174,11 @@ export async function fetchFinancialHistory(ticker: string): Promise<FetchedFina
       };
     })
     .filter((row) => row.revenue != null || row.netIncome != null);
+}
+
+function quarterLabel(date: Date): string {
+  const quarter = Math.floor(date.getUTCMonth() / 3) + 1;
+  return `${date.getUTCFullYear()}Q${quarter}`;
 }
 
 function numOrNull(v: unknown): number | null {
