@@ -32,13 +32,6 @@ export async function POST(_request: Request, { params }: { params: Promise<{ ti
   const stock = await loadStock(ticker);
   if (!stock) return NextResponse.json({ error: "Unknown ticker" }, { status: 404 });
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json(
-      { error: "ANTHROPIC_API_KEY is not configured on the server." },
-      { status: 503 },
-    );
-  }
-
   // Stock-specific notes only — general (untagged) notes aren't included in a single-stock report.
   const notes = await prisma.note.findMany({
     where: { userId: user.id, ticker: stock.ticker },
