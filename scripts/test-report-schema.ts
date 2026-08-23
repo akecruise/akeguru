@@ -31,12 +31,15 @@ console.log("bulls<2   ->", b3.ok ? "PASS (wrong!)" : "REJECT ✓");
 const farEnough = new Date(Date.now() + 100 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 const tooSoon = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
+const sampleTriggers = [{ description: "Net debt rises above 1.5B", metricName: "Total Debt", comparator: "gt" as const, threshold: 1.5e9 }];
+
 // 4. verdict with no killCriteria -> fail
 const b4 = validateSection("verdict", {
   decision: "NO_GO",
   conviction: 3,
   thesis: "x".repeat(25),
   killCriteria: [],
+  invalidationTriggers: sampleTriggers,
   reviewDate: farEnough,
 });
 console.log("no-kill   ->", b4.ok ? "PASS (wrong!)" : "REJECT ✓");
@@ -47,6 +50,7 @@ const good = validateSection("verdict", {
   conviction: 3,
   thesis: "genuinely cheap at PE 2.7 / PB 0.6 but down 45% over 5 years + D/E 0.9 suggests a value trap",
   killCriteria: ["net debt drops below 1.5B", "revenue grows 2 quarters in a row"],
+  invalidationTriggers: sampleTriggers,
   reviewDate: farEnough,
 });
 console.log("valid     ->", good.ok ? "PASS ✓" : "REJECT (wrong!)");
@@ -70,6 +74,19 @@ const b8 = validateSection("verdict", {
   conviction: 3,
   thesis: "x".repeat(25),
   killCriteria: ["x"],
+  invalidationTriggers: sampleTriggers,
   reviewDate: tooSoon,
 });
 console.log("reviewDate<90d ->", b8.ok ? "PASS (wrong!)" : "REJECT ✓");
+
+// 9. verdict with no invalidationTriggers -> fail (Phase 2 — the measurable companion to
+// killCriteria, same min(1) treatment)
+const b9 = validateSection("verdict", {
+  decision: "NO_GO",
+  conviction: 3,
+  thesis: "x".repeat(25),
+  killCriteria: ["x"],
+  invalidationTriggers: [],
+  reviewDate: farEnough,
+});
+console.log("no-triggers ->", b9.ok ? "PASS (wrong!)" : "REJECT ✓");

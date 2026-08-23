@@ -143,11 +143,27 @@ export interface InsiderRow {
 
 // ---------- 13. Verdict ----------
 
+export type TriggerComparator = 'lt' | 'lte' | 'gt' | 'gte';
+
+// Phase 2 roadmap item ("Invalidation Triggers") — killCriteria (prose) stays for the narrative;
+// this is the measurable subset the agent can point at a real, currently-tracked FinancialFact
+// metric for. Not every kill criterion has a clean metric behind it (e.g. "a new CEO reverses the
+// buyback program" has none), so this doesn't replace killCriteria — it's a stricter, checkable
+// companion. scripts/scorecard.ts evaluates these against the latest FinancialFact for the ticker
+// to flag a trigger that's actually fired, not just a human re-reading the prose to notice.
+export interface InvalidationTrigger {
+  description: string;              // human-readable, e.g. "FCF turns negative"
+  metricName: string;                // a real FinancialFact.metricName for this ticker — checked by checkInvalidationTriggers (lib/agents/grounding.ts)
+  comparator: TriggerComparator;      // how the *latest* value of metricName compares to threshold when the trigger fires
+  threshold: number;
+}
+
 export interface Verdict {
   decision: 'GO' | 'WAIT' | 'NO_GO';
   conviction: 1 | 2 | 3 | 4 | 5;
   thesis: string;
   killCriteria: string[];
+  invalidationTriggers: InvalidationTrigger[];
   reviewDate: string;
 }
 

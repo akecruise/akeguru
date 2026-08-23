@@ -13,7 +13,7 @@
  */
 import fs from "fs/promises";
 import path from "path";
-import type { StockReport, MetricGroup, ClaimItem, BulletItem, MoatItem, EstimateBlock, Exchange } from "./types";
+import type { StockReport, MetricGroup, ClaimItem, BulletItem, MoatItem, EstimateBlock, Exchange, InvalidationTrigger } from "./types";
 
 const MARKET_FOLDER: Record<Exchange, string> = {
   SEC: "USA",
@@ -69,6 +69,17 @@ function renderMoat(items: MoatItem[]): string {
  *  doesn't exist yet) render fine in Obsidian and can be filled in by hand or later by that agent. */
 function renderThemeLinks(themes: string[]): string {
   return themes.map((t) => `[[Theme - ${t}]]`).join(", ");
+}
+
+const COMPARATOR_SYMBOL: Record<InvalidationTrigger["comparator"], string> = { lt: "<", lte: "≤", gt: ">", gte: "≥" };
+
+/** A small table, not prose — scripts/scorecard.ts checks these against the latest FinancialFact
+ *  for the ticker, so the metricName/comparator/threshold need to stay scannable here too, not
+ *  buried in a sentence the way killCriteria's prose is. */
+function renderInvalidationTriggers(triggers: InvalidationTrigger[]): string {
+  if (!triggers.length) return "_none_";
+  const rows = triggers.map((t) => `| ${t.description} | ${t.metricName} | ${COMPARATOR_SYMBOL[t.comparator]} ${t.threshold.toLocaleString()} |`);
+  return ["| Trigger | Metric | Condition |", "|---|---|---|", ...rows].join("\n");
 }
 
 function renderEstimates(blocks: EstimateBlock[]): string {
@@ -133,6 +144,7 @@ export function renderStockReportMarkdown(report: StockReport): string {
     ...(meta.themes.length ? [`**Themes:** ${renderThemeLinks(meta.themes)}`] : []),
     `## Thesis\n\n${verdict.thesis}`,
     `## Kill Criteria\n\n${verdict.killCriteria.map((k) => `- ${k}`).join("\n")}`,
+    `## Invalidation Triggers\n\n${renderInvalidationTriggers(verdict.invalidationTriggers)}`,
     `## Bulls\n\n${renderClaims(report.bulls)}`,
     `## Bears\n\n${renderClaims(report.bears)}`,
     `## Business Summary\n\n${renderClaims(report.businessSummary)}`,

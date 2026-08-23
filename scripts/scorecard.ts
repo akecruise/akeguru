@@ -18,7 +18,7 @@ import "dotenv/config";
 import pg from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../generated/prisma/client";
-import type { StockReport } from "../lib/report/types";
+import type { StockReport, InvalidationTrigger, TriggerComparator } from "../lib/report/types";
 
 const REGRET_THRESHOLD_PCT = 15; // a WAIT that ran up 15%+ with no re-review is worth a second look
 
@@ -38,6 +38,29 @@ interface Row {
   daysSince: number;
   pastReviewDate: boolean;
   regret: boolean;
+  triggersTotal: number;
+  firedTriggers: Array<InvalidationTrigger & { currentValue: number }>;
+}
+
+function comparatorFires(comparator: TriggerComparator, value: number, threshold: number): boolean {
+  switch (comparator) {
+    case "lt": return value < threshold;
+    case "lte": return value <= threshold;
+    case "gt": return value > threshold;
+    case "gte": return value >= threshold;
+  }
+}
+
+/** Latest FinancialFact.value for this exact (ticker, metricName) — mirrors how gate2Consistency's
+ *  checkInvalidationTriggers verified the metricName exists at report-time; this is the same lookup
+ *  but for "what's it actually reading right now", not "does it exist at all". */
+async function latestFactValue(ticker: string, metricName: string): Promise<number | null> {
+  const row = await prisma.financialFact.findFirst({
+    where: { ticker, metricName },
+    orderBy: { extractedAt: "desc" },
+    select: { value: true },
+  });
+  return row?.value ?? null;
 }
 
 /** Latest PriceHistory close on or before `date` — PriceHistory is only ever written for trading
@@ -88,9 +111,19 @@ async function main() {
     const currentPrice = sid ? await latestPrice(sid) : null;
     const returnPct = priceAtVerdict && currentPrice ? ((currentPrice - priceAtVerdict) / priceAtVerdict) * 100 : null;
     const daysSince = Math.round((now.getTime() - r.dataAsOf.getTime()) / (24 * 60 * 60 * 1000));
-    const reviewDate = (r.payload as unknown as StockReport).verdict?.reviewDate ?? "?";
+    const verdict = (r.payload as unknown as StockReport).verdict;
+    const reviewDate = verdict?.reviewDate ?? "?";
     const pastReviewDate = reviewDate !== "?" && now >= new Date(`${reviewDate}T00:00:00Z`);
     const regret = r.decision === "WAIT" && returnPct !== null && returnPct >= REGRET_THRESHOLD_PCT;
+
+    const triggers = verdict?.invalidationTriggers ?? [];
+    const firedTriggers: Row["firedTriggers"] = [];
+    for (const t of triggers) {
+      const currentValue = await latestFactValue(r.ticker, t.metricName);
+      if (currentValue !== null && comparatorFires(t.comparator, currentValue, t.threshold)) {
+        firedTriggers.push({ ...t, currentValue });
+      }
+    }
 
     rows.push({
       ticker: r.ticker,
@@ -102,6 +135,8 @@ async function main() {
       priceAtVerdict,
       currentPrice,
       returnPct,
+      triggersTotal: triggers.length,
+      firedTriggers,
       daysSince,
       pastReviewDate,
       regret,
@@ -112,12 +147,13 @@ async function main() {
   const fmtPct = (v: number | null) => (v === null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`);
 
   console.log(
-    "| ticker | decision | conv | dataAsOf | days | price@verdict | current | return | past review | gate | regret |",
+    "| ticker | decision | conv | dataAsOf | days | price@verdict | current | return | past review | gate | regret | triggers |",
   );
-  console.log("|---|---|---|---|---|---|---|---|---|---|---|");
+  console.log("|---|---|---|---|---|---|---|---|---|---|---|---|");
   for (const row of rows) {
+    const triggersCell = row.firedTriggers.length ? `🔴 ${row.firedTriggers.length}/${row.triggersTotal} fired` : `${row.triggersTotal}`;
     console.log(
-      `| ${row.ticker} | ${row.decision} | ${row.conviction} | ${row.dataAsOf.toISOString().slice(0, 10)} | ${row.daysSince} | ${fmtPrice(row.priceAtVerdict)} | ${fmtPrice(row.currentPrice)} | ${fmtPct(row.returnPct)} | ${row.pastReviewDate ? "⚠ yes" : "no"} | ${row.gateStatus} | ${row.regret ? "🔴 REGRET" : ""} |`,
+      `| ${row.ticker} | ${row.decision} | ${row.conviction} | ${row.dataAsOf.toISOString().slice(0, 10)} | ${row.daysSince} | ${fmtPrice(row.priceAtVerdict)} | ${fmtPrice(row.currentPrice)} | ${fmtPct(row.returnPct)} | ${row.pastReviewDate ? "⚠ yes" : "no"} | ${row.gateStatus} | ${row.regret ? "🔴 REGRET" : ""} | ${triggersCell} |`,
     );
   }
 
@@ -125,6 +161,15 @@ async function main() {
   console.log(`\n${regretRows.length} WAIT verdict(s) flagged as regret (>= +${REGRET_THRESHOLD_PCT}% since verdict, no re-review):`);
   for (const r of regretRows) {
     console.log(`  ${r.ticker}: WAIT on ${r.dataAsOf.toISOString().slice(0, 10)} at ${fmtPrice(r.priceAtVerdict)} -> now ${fmtPrice(r.currentPrice)} (${fmtPct(r.returnPct)})`);
+  }
+
+  const triggeredRows = rows.filter((r) => r.firedTriggers.length > 0);
+  const totalFired = triggeredRows.reduce((sum, r) => sum + r.firedTriggers.length, 0);
+  console.log(`\n${totalFired} invalidation trigger(s) fired across ${triggeredRows.length} report(s):`);
+  for (const r of triggeredRows) {
+    for (const t of r.firedTriggers) {
+      console.log(`  ${r.ticker} (${r.decision} on ${r.dataAsOf.toISOString().slice(0, 10)}): ${t.description} — ${t.metricName}=${t.currentValue.toLocaleString()} ${t.comparator} ${t.threshold.toLocaleString()}`);
+    }
   }
 }
 

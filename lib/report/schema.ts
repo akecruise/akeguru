@@ -139,11 +139,23 @@ export const InsiderRowSchema = z.object({
 // ---------- 13 ----------
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
 
+// Phase 2 ("Invalidation Triggers"): the measurable subset of killCriteria — a real
+// FinancialFact.metricName (checked by checkInvalidationTriggers, lib/agents/grounding.ts) plus a
+// comparator/threshold scripts/scorecard.ts can actually evaluate against the latest fact, instead
+// of a human re-reading killCriteria's prose to notice a thesis broke.
+export const InvalidationTriggerSchema = z.object({
+  description: z.string().min(10),
+  metricName: z.string().min(1),
+  comparator: z.enum(['lt', 'lte', 'gt', 'gte']),
+  threshold: z.number(),
+});
+
 export const VerdictSchema = z.object({
   decision: z.enum(['GO', 'WAIT', 'NO_GO']),
   conviction: z.number().int().min(1).max(5),
   thesis: z.string().min(20),
   killCriteria: z.array(z.string()).min(1),   // ต้องบอกได้ว่าอะไรทำให้เปลี่ยนใจ
+  invalidationTriggers: z.array(InvalidationTriggerSchema).min(1),
   reviewDate: z.string(),
 }).refine(
   v => {

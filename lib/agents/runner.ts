@@ -12,7 +12,7 @@ import path from "path";
 import { z } from "zod";
 import type { PrismaClient, Prisma } from "../../generated/prisma/client";
 import { validateSection, sectionSchemas, type SectionName } from "../report/schema";
-import { checkGrounding, checkBulletGrounding, checkMoatGrounding, checkClaimGrounding, type RealFact } from "./grounding";
+import { checkGrounding, checkBulletGrounding, checkMoatGrounding, checkClaimGrounding, checkInvalidationTriggers, type RealFact } from "./grounding";
 import { RateLimitError, FatalProviderError } from "./providers/errors";
 import type { Fundamentals, BulletItem, MoatItem, ClaimItem, Synthesis } from "../report/types";
 import * as anthropicProvider from "./providers/anthropic";
@@ -164,8 +164,12 @@ function groundingIssuesForSection(section: SectionName, data: unknown, realFact
       return checkClaimGrounding(data as ClaimItem[], realFacts).issues.map((i) => `"${i.title}": ${i.reason} — ${i.detail}`);
     case "synthesis": {
       const s = data as Synthesis;
-      const issues = [...checkClaimGrounding(s.bulls, realFacts).issues, ...checkClaimGrounding(s.bears, realFacts).issues];
-      return issues.map((i) => `"${i.title}": ${i.reason} — ${i.detail}`);
+      const claimIssues = [...checkClaimGrounding(s.bulls, realFacts).issues, ...checkClaimGrounding(s.bears, realFacts).issues];
+      const triggerIssues = checkInvalidationTriggers(s.verdict.invalidationTriggers, realFacts).issues;
+      return [
+        ...claimIssues.map((i) => `"${i.title}": ${i.reason} — ${i.detail}`),
+        ...triggerIssues.map((i) => `invalidationTrigger "${i.description}": ${i.reason} — ${i.detail}`),
+      ];
     }
     default:
       return [];

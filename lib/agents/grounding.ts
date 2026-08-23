@@ -20,7 +20,7 @@
  * supportingFactIds stands in for it). See the shared checkTextGrounding() below for the two
  * checks all three run.
  */
-import type { Fundamentals, Metric, BulletItem, MoatItem, ClaimItem, StockReport } from "../report/types";
+import type { Fundamentals, Metric, BulletItem, MoatItem, ClaimItem, InvalidationTrigger, StockReport } from "../report/types";
 
 export interface RealFact {
   id: string;
@@ -364,6 +364,42 @@ export function checkClaimGrounding(claims: ClaimItem[], realFacts: RealFact[]):
   );
 }
 
+export interface InvalidationTriggerIssue {
+  description: string;
+  reason: "unknown-metric";
+  detail: string;
+}
+
+export interface InvalidationTriggerResult {
+  ok: boolean;
+  checkedCount: number;
+  issues: InvalidationTriggerIssue[];
+}
+
+/**
+ * Exhaustive over every InvalidationTrigger (Verdict.invalidationTriggers) — verifies metricName is
+ * a real FinancialFact.metricName for this ticker, not an invented label. Unlike
+ * checkBulletGrounding/checkClaimGrounding, there's no supportingFactIds or number-in-prose to
+ * check here: a trigger references a *metric going forward* (re-evaluated against whatever the
+ * next refresh/ingest reports for that metricName — see scripts/scorecard.ts), not a specific
+ * historical fact row, so factId-style checking doesn't apply — metricName existing among this
+ * ticker's real facts is the whole check.
+ */
+export function checkInvalidationTriggers(triggers: InvalidationTrigger[], realFacts: RealFact[]): InvalidationTriggerResult {
+  const knownMetrics = new Set(realFacts.map((f) => f.metricName));
+  const issues: InvalidationTriggerIssue[] = [];
+  for (const t of triggers) {
+    if (!knownMetrics.has(t.metricName)) {
+      issues.push({
+        description: t.description,
+        reason: "unknown-metric",
+        detail: `metricName "${t.metricName}" is not among this ticker's FinancialFact rows`,
+      });
+    }
+  }
+  return { ok: issues.length === 0, checkedCount: triggers.length, issues };
+}
+
 /** Every factId a StockReport cites anywhere, deduped — what to fetch from FinancialFact before
  *  calling checkStockReportGrounding(). */
 export function collectReportFactIds(report: StockReport): string[] {
@@ -376,7 +412,7 @@ export function collectReportFactIds(report: StockReport): string[] {
 }
 
 export interface StockReportGroundingIssue {
-  section: "fundamentals" | "riskFactors" | "growthDrivers" | "moat" | "businessSummary" | "bulls" | "bears";
+  section: "fundamentals" | "riskFactors" | "growthDrivers" | "moat" | "businessSummary" | "bulls" | "bears" | "invalidationTriggers";
   reason: string;
   title: string;
   detail: string;
@@ -411,6 +447,7 @@ export function checkStockReportGrounding(report: StockReport, realFacts: RealFa
   const businessResult = checkClaimGrounding(report.businessSummary, realFacts);
   const bullsResult = checkClaimGrounding(report.bulls, realFacts);
   const bearsResult = checkClaimGrounding(report.bears, realFacts);
+  const triggersResult = checkInvalidationTriggers(report.verdict.invalidationTriggers, realFacts);
 
   const issues: StockReportGroundingIssue[] = [
     ...fundamentalsResult.issues.map((i) => ({ section: "fundamentals" as const, reason: i.reason, title: i.metricName, detail: i.detail })),
@@ -420,6 +457,7 @@ export function checkStockReportGrounding(report: StockReport, realFacts: RealFa
     ...businessResult.issues.map((i) => ({ section: "businessSummary" as const, reason: i.reason, title: i.title, detail: i.detail })),
     ...bullsResult.issues.map((i) => ({ section: "bulls" as const, reason: i.reason, title: i.title, detail: i.detail })),
     ...bearsResult.issues.map((i) => ({ section: "bears" as const, reason: i.reason, title: i.title, detail: i.detail })),
+    ...triggersResult.issues.map((i) => ({ section: "invalidationTriggers" as const, reason: i.reason, title: i.description, detail: i.detail })),
   ];
 
   const checkedCount =
@@ -429,7 +467,8 @@ export function checkStockReportGrounding(report: StockReport, realFacts: RealFa
     moatResult.checkedCount +
     businessResult.checkedCount +
     bullsResult.checkedCount +
-    bearsResult.checkedCount;
+    bearsResult.checkedCount +
+    triggersResult.checkedCount;
 
   return { ok: issues.length === 0, checkedCount, issues };
 }

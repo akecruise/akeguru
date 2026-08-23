@@ -77,6 +77,12 @@ export function printReport(report: StockReport): string {
   out.push("Kill criteria:");
   for (const k of verdict.killCriteria) out.push(`  - ${k}`);
   out.push("");
+  out.push("Invalidation triggers:");
+  for (const t of verdict.invalidationTriggers) {
+    const cmp = { lt: "<", lte: "<=", gt: ">", gte: ">=" }[t.comparator];
+    out.push(`  - ${t.description}  [${t.metricName} ${cmp} ${t.threshold}]`);
+  }
+  out.push("");
 
   out.push(SUBRULE);
   out.push("FUNDAMENTALS");

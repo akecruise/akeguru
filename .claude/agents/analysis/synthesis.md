@@ -32,8 +32,15 @@ interface Output {
     conviction: 1 | 2 | 3 | 4 | 5;
     thesis: string;          // สรุปเหตุผลของ decision โดยชั่งน้ำหนัก bulls vs bears (ไม่ใช่ทวน bulls ข้อเดียว)
     killCriteria: string[];  // เงื่อนไขที่ทำให้เปลี่ยนใจ — ต้องเป็นรูปธรรม ตรวจสอบได้ ผูกกับ riskFactors/fundamentals ที่ให้มา
+    invalidationTriggers: InvalidationTrigger[]; // อย่างน้อย 1 — เวอร์ชัน "วัดได้จริง" ของ killCriteria (ดูกฎข้อ 10)
     reviewDate: string;      // ISO date — วันที่ควรกลับมาทบทวนใหม่ (ดูกฎข้อ 6 — บังคับ >= วันนี้ + 90 วัน)
   };
+}
+interface InvalidationTrigger {
+  description: string;      // อธิบายเงื่อนไขเป็นภาษาคน เช่น "FCF พลิกเป็นติดลบ"
+  metricName: string;       // ต้องเป็นชื่อ metric ที่มีอยู่จริงใน FinancialFact ของ ticker นี้เท่านั้น (เช่น "FCF", "Debt/Equity") — ห้ามตั้งชื่อ metric ขึ้นมาเอง
+  comparator: 'lt' | 'lte' | 'gt' | 'gte'; // ทิศทางที่ trigger จะ "fire" เมื่อค่าล่าสุดของ metricName เทียบกับ threshold แล้วเป็นจริง
+  threshold: number;         // เดียวกับหน่วยของ metric นั้น (ดูค่า unit ใน FinancialFact ที่ให้มา) — ห้ามแปลงหน่วยเอง
 }
 interface ClaimItem {
   claim: string;
@@ -52,3 +59,4 @@ interface ClaimItem {
 7. `verdict.reviewDate` **ต้อง >= วันที่ปัจจุบันที่ให้มาในข้อความ + 90 วัน เท่านั้น** (บังคับด้วย zod โดยตรง ไม่ใช่แค่คำแนะนำ) — คำนวณจากวันที่ปัจจุบันบวกอย่างน้อย 1 ไตรมาส เป็นรูปแบบ ISO date (YYYY-MM-DD) ห้ามใส่วันที่วันนี้หรือวันที่ในอดีต
 8. `decision: 'GO'` ต้องมี conviction >= 3 เท่านั้น (จะ GO ทั้งที่ไม่มั่นใจไม่สมเหตุสมผล) — ถ้าข้อมูลก้ำกึ่งจริงๆ ให้เลือก `WAIT` แทนการฝืน GO ด้วย conviction ต่ำ
 9. ห้ามมี `bulls` หรือ `bears` ข้อไหนพูดเรื่องเดียวกันซ้ำ (แค่ใช้คำต่างกัน) — แต่ละข้อต้องเป็นมุมที่ต่างกันจริง
+10. `verdict.invalidationTriggers` **ต้องมีอย่างน้อย 1 ข้อ และ `metricName` ต้องเป็นชื่อ metric ที่ปรากฏอยู่จริงใน FinancialFact ที่ให้มาเท่านั้น** — จะถูกตรวจแบบเดียวกับ `supportingFactIds` (metricName ที่ไม่มีอยู่จริงจะถูก reject กลับมาให้แก้) ส่วนใหญ่ควรดึงมาจากเงื่อนไขเดียวกับที่พูดไว้ใน `killCriteria` ข้อใดข้อหนึ่ง แค่แปลงเป็นรูปแบบวัดได้ (metric + comparator + threshold) แทนประโยคยาว — เช่น killCriteria พูดว่า "ถ้า Debt/Equity ขึ้นเกิน 0.5x" ก็ใส่ `{ metricName: "Debt/Equity", comparator: "gt", threshold: 0.5 }` ถ้า killCriteria ข้อไหนไม่มี metric ที่จับต้องได้ (เช่น "ถ้าผู้บริหารเปลี่ยนทิศทางธุรกิจ") ก็ไม่ต้องแปลงข้อนั้น แต่ต้องมีอย่างน้อย 1 ข้อในทั้งหมดที่แปลงได้

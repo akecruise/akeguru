@@ -10,8 +10,8 @@
  * MSFT's real ~3.5T). This is kept verbatim as evidence the DB-existence check actually catches
  * wholesale hallucination, not just a hypothetical.
  */
-import { checkGrounding, checkBulletGrounding, checkMoatGrounding, checkClaimGrounding, checkStockReportGrounding, collectReportFactIds, type RealFact } from "../lib/agents/grounding";
-import type { Fundamentals, BulletItem, MoatItem, ClaimItem, StockReport } from "../lib/report/types";
+import { checkGrounding, checkBulletGrounding, checkMoatGrounding, checkClaimGrounding, checkInvalidationTriggers, checkStockReportGrounding, collectReportFactIds, type RealFact } from "../lib/agents/grounding";
+import type { Fundamentals, BulletItem, MoatItem, ClaimItem, InvalidationTrigger, StockReport } from "../lib/report/types";
 
 function check(label: string, actual: boolean, expected: boolean) {
   const pass = actual === expected;
@@ -618,7 +618,14 @@ const MINIMAL_REPORT_WITH_ONE_BAD_RISK: StockReport = {
   insiders: [],
   bulls: [{ claim: "The company reports real revenue with a traceable source.", supportingFactIds: ["cmt-rev-report"] }],
   bears: [{ claim: "No specific bear case beyond general market risk is identified here.", supportingFactIds: ["cmt-rev-report"] }],
-  verdict: { decision: "WAIT", conviction: 3, thesis: "x".repeat(25), killCriteria: ["x"], reviewDate: "2027-01-01" },
+  verdict: {
+    decision: "WAIT",
+    conviction: 3,
+    thesis: "x".repeat(25),
+    killCriteria: ["x"],
+    invalidationTriggers: [{ description: "Revenue turns negative", metricName: "Revenue", comparator: "lt", threshold: 0 }],
+    reviewDate: "2027-01-01",
+  },
 };
 
 {
@@ -754,6 +761,26 @@ const CFO_NEGATIVE_FACT: RealFact[] = [{ id: "cmt-cfo-inset-2024", metricName: "
   const controlResult = checkBulletGrounding([wrongMagnitude], CFO_NEGATIVE_FACT);
   console.log(`   (control) the sign-tolerance doesn't mask a wrong magnitude — fabricated $999.99M still caught: ${!controlResult.ok ? "yes ✓" : "no ✗ (" + JSON.stringify(controlResult.issues) + ")"}`);
   if (controlResult.ok) process.exitCode = 1;
+}
+
+// ---------- Case 27: checkInvalidationTriggers (Phase 2 — Invalidation Triggers) ----------
+// Unlike every check above, a trigger has no supportingFactIds/number-in-prose to verify — it
+// references a metric *going forward* (re-checked against whatever a later refresh reports), so
+// the whole check is just "does this ticker actually have a FinancialFact under this metricName".
+
+const FCF_FACT: RealFact[] = [{ id: "cmt-fcf-real", metricName: "FCF", value: 16545500160, unit: "currency" }];
+
+{
+  const realTrigger: InvalidationTrigger = { description: "FCF turns negative", metricName: "FCF", comparator: "lt", threshold: 0 };
+  const result = checkInvalidationTriggers([realTrigger], FCF_FACT);
+  check("27. real metricName on a trigger -> passes", result.ok, true);
+
+  const fakeTrigger: InvalidationTrigger = { description: "Free Cash Flow Margin collapses", metricName: "Free Cash Flow Margin", comparator: "lt", threshold: 0.02 };
+  const fakeResult = checkInvalidationTriggers([fakeTrigger], FCF_FACT);
+  check("27b. invented metricName on a trigger -> caught", fakeResult.ok, false);
+  const caughtAsUnknownMetric = fakeResult.issues.length === 1 && fakeResult.issues[0].reason === "unknown-metric";
+  console.log(`   caught via unknown-metric specifically: ${caughtAsUnknownMetric ? "yes ✓" : "no ✗ (" + JSON.stringify(fakeResult.issues) + ")"}`);
+  if (!caughtAsUnknownMetric) process.exitCode = 1;
 }
 
 console.log("\ndone.");
