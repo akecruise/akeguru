@@ -12,6 +12,8 @@ import path from "path";
 import { z } from "zod";
 import type { PrismaClient, Prisma } from "../../generated/prisma/client";
 import { validateSection, sectionSchemas, type SectionName } from "../report/schema";
+import { checkGrounding, checkBulletGrounding, checkMoatGrounding, checkClaimGrounding, type RealFact } from "./grounding";
+import type { Fundamentals, BulletItem, MoatItem, ClaimItem, Synthesis } from "../report/types";
 import * as anthropicProvider from "./providers/anthropic";
 import * as geminiProvider from "./providers/gemini";
 import * as groqProvider from "./providers/groq";
@@ -133,6 +135,37 @@ async function loadLatestFacts(prisma: PrismaClient, ticker: string) {
   return deduped;
 }
 
+/**
+ * Runs the grounding check that applies to `section` (Gate 2's checks, but per-agent and before
+ * anything is saved, not post-hoc on an already-saved ResearchReport) and returns any issues as
+ * feedback strings in the same shape validateSection() errors already use — so the retry loop
+ * below can treat a hallucinated factId/number exactly like a schema failure. estimates/insiders/
+ * charts/verdict have no supportingFactIds-bearing field, so there's nothing to check there.
+ */
+function groundingIssuesForSection(section: SectionName, data: unknown, realFacts: RealFact[]): string[] {
+  switch (section) {
+    case "fundamentals":
+      return checkGrounding(data as Fundamentals, realFacts).issues.map((i) => `${i.metricName}: ${i.reason} — ${i.detail}`);
+    case "riskFactors":
+    case "growthDrivers":
+    case "recentDevelopments":
+      return checkBulletGrounding(data as BulletItem[], realFacts).issues.map((i) => `"${i.title}": ${i.reason} — ${i.detail}`);
+    case "moat":
+      return checkMoatGrounding(data as MoatItem[], realFacts).issues.map((i) => `"${i.title}": ${i.reason} — ${i.detail}`);
+    case "businessSummary":
+    case "bulls":
+    case "bears":
+      return checkClaimGrounding(data as ClaimItem[], realFacts).issues.map((i) => `"${i.title}": ${i.reason} — ${i.detail}`);
+    case "synthesis": {
+      const s = data as Synthesis;
+      const issues = [...checkClaimGrounding(s.bulls, realFacts).issues, ...checkClaimGrounding(s.bears, realFacts).issues];
+      return issues.map((i) => `"${i.title}": ${i.reason} — ${i.detail}`);
+    }
+    default:
+      return [];
+  }
+}
+
 export async function runAgent(
   prisma: PrismaClient,
   ticker: string,
@@ -187,35 +220,45 @@ export async function runAgent(
 
     const result = validateSection(section, parsed);
     if (result.ok) {
-      const saved = await prisma.analysisOutput.create({
-        data: {
-          ticker,
+      // Schema-valid isn't citation-clean (see lib/agents/grounding.ts's header comment and
+      // docs/eval/*.md) — check grounding before saving, and feed any issue back into the same
+      // retry loop schema failures already use, rather than saving a hallucinated citation and
+      // only catching it later in Gate 2 after the whole report (and its API cost) is spent.
+      const groundingIssues = groundingIssuesForSection(section, result.data, facts);
+      if (groundingIssues.length === 0) {
+        const saved = await prisma.analysisOutput.create({
+          data: {
+            ticker,
+            section,
+            content: parsed as Prisma.InputJsonValue,
+            generatedBy: `${agent.name} (${backendLabel})`,
+            modelTier: tier,
+            gateStatus: "PENDING",
+            retryCount: attempt,
+          },
+        });
+        return {
+          ok: true,
           section,
-          content: parsed as Prisma.InputJsonValue,
-          generatedBy: `${agent.name} (${backendLabel})`,
+          content: parsed,
           modelTier: tier,
-          gateStatus: "PENDING",
+          provider: providerName,
+          backendModel,
           retryCount: attempt,
-        },
-      });
-      return {
-        ok: true,
-        section,
-        content: parsed,
-        modelTier: tier,
-        provider: providerName,
-        backendModel,
-        retryCount: attempt,
-        analysisOutputId: saved.id,
-        elapsedMs: Date.now() - startedAt,
-      };
+          analysisOutputId: saved.id,
+          elapsedMs: Date.now() - startedAt,
+        };
+      }
+      lastErrors = groundingIssues;
+      continue;
     }
     lastErrors = result.errors;
   }
 
   // total failure after MAX_RETRIES — not saved to AnalysisOutput: the content never passed
-  // schema validation, so persisting it would put non-conforming JSON in a column downstream
-  // code expects to already be Fundamentals-shaped. The caller gets the errors to report instead.
+  // schema validation or grounding, so persisting it would put an unreliable citation (or a
+  // non-conforming shape) in a column downstream code expects to already be validated and
+  // trustworthy. The caller gets the errors to report instead.
   return {
     ok: false,
     section,
