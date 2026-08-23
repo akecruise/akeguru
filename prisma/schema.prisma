@@ -464,3 +464,44 @@ model CompanyRelation {
   @@index([ticker])
   @@index([relatedTicker])
 }
+
+enum SentimentLabel {
+  BULL
+  NEUTRAL
+  BEAR
+}
+
+enum AuthorSegment {
+  RETAIL
+  GURU
+  BOT
+  UNKNOWN
+}
+
+// Xueqiu Layer 8 (Phase 3 roadmap item) -- this app's own LLM sentiment classification + author
+// segmentation for a post, keyed to a ticker this app tracks. Raw post collection/dedup/stock-
+// linking is owned by Codex, a separate local pipeline (D:\Secondbrain\SocialMedia\database\
+// socialmedia.db, SQLite) -- scripts/sync-social-sentiment.ts reads posts from there already
+// linked to a tracked ticker, this table only holds the analysis this app runs on top.
+model SocialSentiment {
+  id             String        @id @default(cuid())
+  ticker         String
+  sourcePlatform String        // Codex's sources.name, e.g. 'Reddit' | 'Xueqiu' -- free text, that pipeline owns the vocabulary
+  externalPostId String        // Codex posts.id (SQLite integer, as string) -- dedup key alongside sourcePlatform
+  author         String?
+  publishedAt    DateTime?
+  contentExcerpt String        @db.Text // trimmed post content, for traceability/review -- Codex's SQLite is the source of truth for the full post
+
+  sentiment      SentimentLabel
+  sentimentScore Float          // -1..1
+  authorSegment  AuthorSegment
+  confidence     Float          // 0..1
+  modelName      String
+  reasoning      String         @db.Text
+
+  analyzedAt     DateTime      @default(now())
+
+  @@unique([sourcePlatform, externalPostId])
+  @@index([ticker])
+  @@index([sentiment])
+}

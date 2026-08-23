@@ -22,7 +22,10 @@ import * as ollamaProvider from "./providers/ollama";
 import * as xaiProvider from "./providers/xai";
 import * as claudeCliProvider from "./providers/claude-cli";
 
-const PROVIDERS = {
+// Exported: lib/agents/sentiment-runner.ts (Phase 3 "Xueqiu Layer 8") reuses the same provider
+// call shape for post sentiment analysis, which doesn't fit runAgent()'s FinancialFact-grounding-
+// specific retry loop below -- there's no numeric fact to check a sentiment classification against.
+export const PROVIDERS = {
   anthropic: anthropicProvider,
   gemini: geminiProvider,
   groq: groqProvider,
@@ -63,7 +66,7 @@ const AGENT_MODEL_TIER = {
   opus: "TIER2_OPUS" as const,
   sonnet: "TIER3_SONNET" as const,
 };
-type AgentModelKey = keyof typeof AGENT_MODEL_TIER;
+export type AgentModelKey = keyof typeof AGENT_MODEL_TIER;
 
 const MAX_RETRIES = 2; // 1 initial attempt + up to 2 retries = 3 attempts total
 const RATE_LIMIT_BACKOFF_MS = 5_000; // multiplied by (attempt + 1) — 5s, then 10s
@@ -72,13 +75,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-interface AgentFile {
+export interface AgentFile {
   name: string;
   model: AgentModelKey;
   instructions: string;
 }
 
-async function loadAgent(agentPath: string): Promise<AgentFile> {
+export async function loadAgent(agentPath: string): Promise<AgentFile> {
   const raw = await fs.readFile(agentPath, "utf-8");
   const match = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(raw);
   if (!match) throw new Error(`agent file ${agentPath}: ไม่มี frontmatter (---...---)`);
@@ -92,7 +95,7 @@ async function loadAgent(agentPath: string): Promise<AgentFile> {
   return { name, model: modelKey, instructions: body.trim() };
 }
 
-function tryParseJson(text: string): unknown {
+export function tryParseJson(text: string): unknown {
   // strip a markdown fence if the model wrapped the JSON in one despite instructions not to
   const stripped = text
     .trim()
