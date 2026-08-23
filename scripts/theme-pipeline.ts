@@ -22,39 +22,14 @@ import { spawnSync } from "child_process";
 import pg from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../generated/prisma/client";
+import { resolveRelatedTickers, type RelatedTicker } from "../lib/company-relation";
 
 const pool = new pg.Pool({ connectionString: process.env.DIRECT_URL });
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 
-interface ChainMember {
-  ticker: string;
-  role: string; // "core theme member" or e.g. "SUPPLIER of MSFT"
-}
-
-async function resolveValueChain(theme: string): Promise<ChainMember[]> {
+async function resolveValueChain(theme: string): Promise<RelatedTicker[]> {
   const coreStocks = await prisma.stock.findMany({ where: { themes: { has: theme } }, select: { ticker: true } });
-  const coreTickers = coreStocks.map((s) => s.ticker);
-
-  const members = new Map<string, ChainMember>();
-  for (const ticker of coreTickers) members.set(ticker, { ticker, role: "core theme member" });
-
-  if (coreTickers.length) {
-    const relations = await prisma.companyRelation.findMany({
-      where: { OR: [{ ticker: { in: coreTickers } }, { relatedTicker: { in: coreTickers } }] },
-    });
-    for (const r of relations) {
-      // Outgoing (r.ticker is a core member, relatedTicker is the "other" one): "<relatedTicker> is a <TYPE> of <ticker>".
-      if (coreTickers.includes(r.ticker) && !members.has(r.relatedTicker)) {
-        members.set(r.relatedTicker, { ticker: r.relatedTicker, role: `${r.relationType} of ${r.ticker}` });
-      }
-      // Incoming (r.relatedTicker is a core member, r.ticker is the "other" one): "<ticker> has <relatedTicker> as a <TYPE>", i.e. ticker's perspective names relatedTicker -- so from the *chain's* perspective, ticker is related to the theme via that same relation, just the other direction.
-      if (coreTickers.includes(r.relatedTicker) && !members.has(r.ticker)) {
-        members.set(r.ticker, { ticker: r.ticker, role: `has ${r.relatedTicker} as a ${r.relationType}` });
-      }
-    }
-  }
-
-  return [...members.values()];
+  return resolveRelatedTickers(prisma, coreStocks.map((s) => s.ticker), "core theme member");
 }
 
 function runScript(scriptPath: string, ticker: string): boolean {
