@@ -10,8 +10,8 @@
  * then synthesis last, since it specifically needs fundamentals/riskFactors/moat as context (see
  * lib/agents/context.ts's buildSynthesisContext) to weigh bulls against bears.
  *
- * Does NOT run the Gate 1-6 / QualityGateLog pipeline referenced in prisma/schema.prisma
- * (gateNumber 1-6, gateName 'fact'|'consistency'|...|'nena') — that's a separate step against the
+ * Does NOT run the Gate 1-7 / QualityGateLog pipeline referenced in prisma/schema.prisma
+ * (gateNumber 1-7, gateName 'fact'|'consistency'|...|'nena'|'sector-metrics') — that's a separate step against the
  * already-saved ResearchReport (lib/gates's runGates(), called from scripts/run-report.ts after
  * the row is created), not part of assembling the report itself.
  */
@@ -23,6 +23,7 @@ import { buildConsensusEstimates } from "./estimates";
 import { validateReport, type SectionName } from "./schema";
 import { detectExchange } from "../data/input-sources/router";
 import { computeExpectationGap, computeNormalizedFcf, computeRevenueCagr } from "../data/expectation-gap";
+import { buildValuationGuidance, normalizeSector } from "../sector-profile";
 import type { StockReport, Fundamentals, BulletItem, MoatItem, FactorExposure, ClaimItem, Synthesis, ModelTier } from "./types";
 
 /**
@@ -114,10 +115,32 @@ export async function runFullReport(
     });
   }
 
+  // Sector-aware valuation guidance (lib/sector-profile.ts) — which metrics are even meaningful for
+  // this sector (e.g. P/E is an artifact for a pre-revenue biotech, EV/EBITDA is meaningless for a
+  // bank) fed to the valuation agent as context, not enforced by zod -- the schema can't know a
+  // priori which metric a sector needs. Best-effort: an unmapped/missing sector (raw Yahoo sector
+  // string not in SECTOR_ALIASES, or sector null) skips the guidance rather than failing the whole
+  // report over a classification gap.
+  const sectorStock = await prisma.stock.findUnique({ where: { ticker }, select: { sector: true } });
+  let sectorGuidance: string | undefined;
+  if (sectorStock?.sector) {
+    try {
+      sectorGuidance = buildValuationGuidance(normalizeSector(sectorStock.sector));
+    } catch (e) {
+      console.warn(`[orchestrator] sector guidance skipped for ${ticker}: ${(e as Error).message}`);
+    }
+  }
+
   // Independent of each other and of business/growth — run first.
-  const valuationResult = await safeRunAgent(prisma, ticker, AGENT_PATHS.valuation, "fundamentals", providerOverride);
+  const valuationResult = await safeRunAgent(prisma, ticker, AGENT_PATHS.valuation, "fundamentals", providerOverride, sectorGuidance);
   record("valuation", valuationResult);
-  const riskResult = await safeRunAgent(prisma, ticker, AGENT_PATHS.risk, "riskFactors", providerOverride);
+  // Also given to risk (not just valuation): valuation.md is a pure fact-transcriber by design (no
+  // interpretation, see its own rule 6 -- copy every real metric, judge nothing), so sector
+  // guidance there only helps with grouping/labeling. risk.md is where a metric actually gets
+  // *interpreted* into a conclusion (e.g. "negative P/E signals distress") -- that's exactly the
+  // SMT-style misread this guidance exists to prevent, so it needs to reach the agent that
+  // interprets, not just the one that transcribes.
+  const riskResult = await safeRunAgent(prisma, ticker, AGENT_PATHS.risk, "riskFactors", providerOverride, sectorGuidance);
   record("risk", riskResult);
   const moatResult = await safeRunAgent(prisma, ticker, AGENT_PATHS.moat, "moat", providerOverride);
   record("moat", moatResult);
@@ -186,7 +209,8 @@ export async function runFullReport(
       ? JSON.stringify(expectationGap)
       : "null (ข้อมูลไม่พอคำนวณ เช่น FCF ติดลบ หรือไม่มี estimate การเติบโต -- ไม่ต้องพูดถึงในรายงาน)") +
     `\n\n[factorSensitivity] (macro exposure ที่ agent ก่อนหน้าระบุไว้แล้ว -- เอาไปใช้ประกอบ bulls/bears/thesis ถ้ามีนัยสำคัญ)\n` +
-    JSON.stringify(factorSensitivityResult.ok ? factorSensitivityResult.content : []);
+    JSON.stringify(factorSensitivityResult.ok ? factorSensitivityResult.content : []) +
+    (sectorGuidance ? `\n\n[sectorGuidance] (lib/sector-profile.ts -- metric ไหนเชื่อถือได้/ไม่ได้สำหรับ sector นี้ ก่อนสรุป bulls/bears/thesis/verdict)\n${sectorGuidance}` : "");
   const synthesisResult = await safeRunAgent(prisma, ticker, AGENT_PATHS.synthesis, "synthesis", providerOverride, synthesisContext);
   record("synthesis", synthesisResult);
 

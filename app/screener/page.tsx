@@ -275,7 +275,7 @@ export default async function ScreenerPage({
                 </td>
                 <td className="py-2 pr-4">
                   {fmtNum(stock.pegRatio, { maximumFractionDigits: 2 })}
-                  {isLynchBuyCandidate(stock.pegRatio, stock.debtToEquity) && (
+                  {isLynchBuyCandidate(stock.pegRatio, stock.debtToEquity, stock.sector) && (
                     <span className="ml-1" title="PEG < 1 with reasonable debt (Lynch buy candidate)">⭐</span>
                   )}
                 </td>

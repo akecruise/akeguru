@@ -1,8 +1,9 @@
 /**
- * Runs Gate 1-6 (prisma/schema.prisma's QualityGateLog pipeline — previously unimplemented, see
+ * Runs Gate 1-7 (prisma/schema.prisma's QualityGateLog pipeline — previously unimplemented, see
  * lib/report/orchestrator.ts's header comment) against an already-saved ResearchReport, writes one
- * QualityGateLog row per gate, and sets ResearchReport.gateStatus to APPROVED (all 6 passed) or
- * REJECTED (any failed).
+ * QualityGateLog row per gate, and sets ResearchReport.gateStatus to APPROVED (all 7 passed) or
+ * REJECTED (any failed). Gate 7 (sector-metrics) is newer than the rest — added alongside
+ * lib/sector-profile.ts, not part of the original Gate 1-6 design.
  *
  * rigor reflects how deep a code-only check can actually go for this ticker's market (GateRigor's
  * doc comment: "US has XBRL for a full check; HK/TH can only compare against Yahoo"): FULL when a
@@ -19,6 +20,7 @@ import { gate3Balance } from "./gate3-balance";
 import { gate4Freshness } from "./gate4-freshness";
 import { gate5Completeness } from "./gate5-completeness";
 import { gate6Nena } from "./gate6-nena";
+import { gate7SectorMetrics } from "./gate7-sector-metrics";
 import type { GateOutcome } from "./types";
 
 const GATE_FILES: Record<number, string> = {
@@ -28,6 +30,7 @@ const GATE_FILES: Record<number, string> = {
   4: "gate4-freshness.ts",
   5: "gate5-completeness.ts",
   6: "gate6-nena.ts",
+  7: "gate7-sector-metrics.ts",
 };
 
 export interface RunGatesResult {
@@ -45,9 +48,10 @@ export async function runGates(prisma: PrismaClient, reportId: string): Promise<
     ? await prisma.financialFact.findMany({ where: { id: { in: factIds } }, select: { id: true, metricName: true, value: true, unit: true } })
     : [];
 
-  const [allFacts, rawSources] = await Promise.all([
+  const [allFacts, rawSources, stock] = await Promise.all([
     prisma.financialFact.findMany({ where: { ticker: report.ticker } }),
     prisma.rawSource.findMany({ where: { ticker: report.ticker } }),
+    prisma.stock.findUnique({ where: { ticker: report.ticker }, select: { sector: true } }),
   ]);
 
   const markets = new Set(rawSources.map((r) => r.market));
@@ -60,6 +64,7 @@ export async function runGates(prisma: PrismaClient, reportId: string): Promise<
     gate4Freshness(report.dataAsOf),
     gate5Completeness(payload),
     await gate6Nena(allFacts, rawSources),
+    gate7SectorMetrics(payload, stock?.sector ?? null, citedFacts),
   ];
 
   const gateStatus = outcomes.every((o) => o.passed) ? "APPROVED" : "REJECTED";

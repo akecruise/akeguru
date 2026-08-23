@@ -11,6 +11,7 @@
  * pattern, or per-segment/per-asset valuation) that a handful of cached ratios can't approximate
  * without guessing. Left `null` (unclassified) rather than forcing a guess into one of the other 4.
  */
+import { normalizeSector, getScreenerAdjustment } from "./sector-profile";
 
 export type LynchCategory = "fast_grower" | "stalwart" | "slow_grower" | "cyclical";
 
@@ -53,13 +54,29 @@ export function computePegRatio(peRatio: number | null, estEarningsGrowth: numbe
 const PEG_BUY_THRESHOLD = 1.0; // Lynch: PEG < 1 attractive, < 0.5 very attractive -- this flags the looser "attractive" bar
 const MAX_DEBT_TO_EQUITY = 1.0; // Lynch was debt-averse outside asset plays (not classified here anyway)
 
-/** A PEG below threshold on a balance sheet that isn't over-levered -- the two hard filters from
- *  Lynch's method this data can actually check. Low institutional ownership ("not yet discovered")
- *  is a real Lynch signal too but stays a soft note, not a gate here -- heldPercentInstitutions
- *  being high is common for large, well-covered stocks for reasons having nothing to do with
- *  whether the stock is a good buy, so gating on it would just filter out large caps as a group. */
-export function isLynchBuyCandidate(pegRatio: number | null, debtToEquity: number | null): boolean {
+/**
+ * A PEG below threshold on a balance sheet that isn't over-levered -- the two hard filters from
+ * Lynch's method this data can actually check. Low institutional ownership ("not yet discovered")
+ * is a real Lynch signal too but stays a soft note, not a gate here -- heldPercentInstitutions
+ * being high is common for large, well-covered stocks for reasons having nothing to do with
+ * whether the stock is a good buy, so gating on it would just filter out large caps as a group.
+ *
+ * `rawSector` (optional): when lib/sector-profile.ts's screenerAdjustment for this sector is
+ * 'exclude' (staples, energy, materials, real estate, utilities -- see that file), a PEG-based
+ * growth screen isn't measuring what it looks like it's measuring for these sectors' own reasons
+ * (bond-proxy yield stocks, cyclical earnings, FFO not EPS, ...), so no PEG here counts as a buy
+ * signal regardless of the number -- same reasoning that file already documents per sector.
+ * Omitted/unmapped sector falls back to the plain PEG+debt check, same as before this existed.
+ */
+export function isLynchBuyCandidate(pegRatio: number | null, debtToEquity: number | null, rawSector?: string | null): boolean {
   if (pegRatio == null || pegRatio >= PEG_BUY_THRESHOLD) return false;
   if (debtToEquity != null && debtToEquity > MAX_DEBT_TO_EQUITY) return false;
+  if (rawSector) {
+    try {
+      if (getScreenerAdjustment(normalizeSector(rawSector)).mode === "exclude") return false;
+    } catch {
+      // unmapped sector string -- fall through to the plain PEG+debt result
+    }
+  }
   return true;
 }
