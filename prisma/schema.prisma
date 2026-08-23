@@ -13,6 +13,7 @@ datasource db {
 enum Market {
   TH
   US
+  HK
 }
 
 enum PeriodType {
@@ -235,4 +236,163 @@ model DeepReport {
   createdAt DateTime @default(now())
 
   @@index([stockId, userId])
+}
+
+// ============================================================
+//  Compound OS — multi-market research pipeline (Phase 0)
+//  RawSource -> FinancialFact -> AnalysisOutput -> ResearchReport -> QualityGateLog -> KnowledgeNote
+//
+//  Renamed vs. the original plan to avoid collisions with the models above:
+//    Market (source enum)      -> SourceMarket   (Stock.market's `Market` enum already means TH/US/HK)
+//    DeepReport (report model) -> ResearchReport (DeepReport above is the existing simple AI-report feature)
+// ============================================================
+
+// ---------- 1. RawSource — pointer to an archived raw file on disk ----------
+// insert-only: never update or delete. A changed filing gets a new row (new hash).
+
+model RawSource {
+  id           String   @id @default(cuid())
+  ticker       String
+  market       SourceMarket
+  filePath     String // path on disk, not the file content
+  sha256Hash   String   @unique // dedupes re-fetches + detects a changed source file
+  sourceUrl    String?
+  fiscalPeriod String?
+  fetchedBy    String // 'sec.ts' | 'hkex.ts' | 'th.ts' | 'router.ts:archiveYahoo'
+  fetchedAt    DateTime @default(now())
+
+  facts        FinancialFact[]
+
+  @@index([ticker, fetchedAt])
+  @@index([market, ticker])
+}
+
+// ---------- 2. FinancialFact — one row = one number, traceable to its RawSource ----------
+
+model FinancialFact {
+  id          String    @id @default(cuid())
+  rawSourceId String
+  rawSource   RawSource @relation(fields: [rawSourceId], references: [id], onDelete: Restrict)
+
+  ticker      String
+  metricName  String // 'P/E' | 'ROE' | 'Revenue'
+  value       Float
+  unit        String // 'x' | '%' | 'currency' | 'count'
+  period      String // '2025-12-31'
+  statement   String? // 'BS' | 'IS' | 'CF'
+  extractedBy String // 'YAHOO_FIELD_MAP' | 'extractor-agent'
+  extractedAt DateTime  @default(now())
+
+  @@unique([ticker, metricName, period, rawSourceId])
+  @@index([ticker, metricName])
+  @@index([ticker, period])
+}
+
+// ---------- 3. AnalysisOutput — one agent's output for one report section ----------
+
+model AnalysisOutput {
+  id          String     @id @default(cuid())
+  ticker      String
+  section     String // 'moat' | 'riskFactors' | 'verdict' ...
+  content     Json // matches sectionSchemas[section] in lib/report/schema.ts
+  generatedBy String
+  modelTier   ModelTier
+  gateStatus  GateStatus @default(PENDING)
+  retryCount  Int        @default(0)
+  createdAt   DateTime   @default(now())
+
+  @@index([ticker, section, createdAt])
+}
+
+// ---------- 4. ResearchReport — the full compound-os report (StockReport payload) ----------
+
+model ResearchReport {
+  id           String       @id @default(cuid())
+  ticker       String
+  exchange     SourceMarket
+  payload      Json // StockReport object (see lib/report/types.ts)
+  decision     Decision
+  conviction   Int
+  dataAsOf     DateTime
+  gateStatus   GateStatus   @default(PENDING)
+  modelTier    ModelTier
+  obsidianPath String?
+  createdAt    DateTime     @default(now())
+
+  gateLogs     QualityGateLog[]
+
+  @@index([ticker, createdAt])
+  @@index([decision, conviction])
+  @@index([gateStatus])
+}
+
+// ---------- 5. QualityGateLog — one row per gate check on a ResearchReport ----------
+
+model QualityGateLog {
+  id         String         @id @default(cuid())
+  reportId   String
+  report     ResearchReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  gateNumber Int // 1-6
+  gateName   String // 'fact' | 'consistency' | ... | 'nena'
+  passed     Boolean
+  rigor      GateRigor // markets differ in how deep this gate can actually check
+  notes      Json?
+  reviewedBy String // 'gate1.ts' | 'nena-agent'
+  reviewedAt DateTime       @default(now())
+
+  @@index([reportId, gateNumber])
+}
+
+// ---------- 6. KnowledgeNote — pointer into the Obsidian vault (feedback loop) ----------
+
+model KnowledgeNote {
+  id             String   @id @default(cuid())
+  ticker         String
+  obsidianPath   String   @unique
+  title          String
+  tags           String[]
+  linkedReportId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([ticker])
+}
+
+// ---------- enums ----------
+
+enum SourceMarket {
+  SEC    // SEC EDGAR (US)
+  HKEX   // HKEX filings (HK)
+  TH_SEC // ก.ล.ต. (TH)
+  SET    // SET factsheet (TH)
+  YAHOO  // Yahoo Finance (all markets)
+  NEWS
+  MANUAL
+}
+
+enum ModelTier {
+  TIER1_FABLE5
+  TIER2_OPUS
+  TIER3_SONNET
+  NONE // pure code, no AI involved
+}
+
+enum GateStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum Decision {
+  GO
+  WAIT
+  NO_GO
+}
+
+// How deep a gate can actually check — US has XBRL for a full check; HK/TH can only compare against Yahoo.
+enum GateRigor {
+  FULL    // checked against an official structured source (SEC XBRL)
+  PARTIAL // checked against Yahoo only
+  MANUAL  // needs a human
 }

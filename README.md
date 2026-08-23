@@ -2,7 +2,7 @@
 
 A personal stock-research app modeled on GuruFocus and Simply Wall St — fundamentals lookup, a personal watchlist, a screener, a Snowflake-style valuation score, configurable fundamental/momentum ranking, and on-demand AI deep reports that combine cached fundamentals with your own notes.
 
-Covers both Thai (SET, `.BK`) and global/US stocks. Built with Next.js (App Router), TypeScript, Prisma 7, and PostgreSQL.
+Covers Thai (SET, `.BK`), global/US, and Hong Kong (HKEX, `.HK`) stocks. Built with Next.js (App Router), TypeScript, Prisma 7, and PostgreSQL.
 
 ## Stack
 
@@ -10,7 +10,9 @@ Covers both Thai (SET, `.BK`) and global/US stocks. Built with Next.js (App Rout
 - **Data**: PostgreSQL via Prisma 7 (driver adapters, `@prisma/adapter-pg`)
 - **Auth**: NextAuth v4 (Credentials + JWT)
 - **Market data**: `yahoo-finance2` (unofficial, free — see [Data source](#data-source) below)
-- **AI**: `@anthropic-ai/sdk` for on-demand deep reports
+- **AI**: two separate systems, both defaulting to the local `claude` CLI (headless `claude -p`, no API key — uses whatever this machine's `claude login` session already has) now that deploy is local —
+  - the original on-demand "Deep report" button (`lib/deep-report.ts`): Anthropic API (`@anthropic-ai/sdk`, needs `ANTHROPIC_API_KEY`) if set → local `claude` CLI → Ollama as a last resort
+  - the newer Compound OS multi-agent research pipeline (`lib/agents/`, `.claude/agents/analysis/*.md` — valuation/risk/moat/business/growth/synthesis, plus a pure-function `estimates` step): `AGENT_PROVIDER=claude-cli` by default, with `gemini` wired up as a free-tier fallback; see [Compound OS pipeline](#compound-os-pipeline) below
 
 See `C:\Users\ADMin\.claude\plans\lazy-strolling-rossum.md` for the full design rationale, architecture review notes, and build history.
 
@@ -36,7 +38,7 @@ npx prisma db push       # sync the schema (local dev only — see note below)
 npm run refresh          # pull fundamentals for the curated ticker universe from Yahoo
 ```
 
-`npm run refresh` runs `scripts/refresh-universe.ts` — it fetches fundamentals, financial history, and price history for every ticker in `lib/data/universe-{th,us}.ts`, then computes Snowflake scores. It's safe to re-run; everything is upserted.
+`npm run refresh` runs `scripts/refresh-universe.ts` — it fetches fundamentals, financial history, and price history for every ticker in `lib/data/universe-{th,us,hk}.ts`, then computes Snowflake scores. It's safe to re-run; everything is upserted.
 
 > **Note on `prisma db push` vs `prisma migrate dev`**: the local `prisma dev` engine doesn't support a genuine second (shadow) database, so `prisma migrate dev` fails there. Local iteration uses `db push` instead. When deploying against a real Postgres (Neon, Prisma Postgres, etc.), generate a proper baseline migration there with `prisma migrate dev --create-only`.
 
@@ -54,8 +56,10 @@ Visit `http://localhost:3000`. Register an account to use the watchlist and deep
 |---|---|
 | `npm run dev` | Start the Next.js dev server |
 | `npm run build` / `npm run start` | Production build / start |
-| `npm run refresh` | Refresh the cached ticker universe (fundamentals, prices, scores) — this is what `.github/workflows/refresh.yml` runs daily in production |
-| `npm run sync-notes` | **Local-only.** Syncs an Obsidian vault into the `Note` table for deep reports. Needs `OBSIDIAN_VAULT_PATH` and `NOTES_SYNC_USER_EMAIL` set (see `.env`). Never run in CI — a deployed instance has no filesystem access to your vault. |
+| `npm run refresh` | Refresh the cached ticker universe (fundamentals, prices, scores) — scheduled locally via Windows Task Scheduler (see [Deploying](#deploying)) |
+| `npm run sync-notes` | **Local-only.** Syncs an Obsidian vault into the `Note` table for deep reports. Needs `OBSIDIAN_VAULT_PATH` and `NOTES_SYNC_USER_EMAIL` set (see `.env`). |
+| `npx tsx scripts/ingest.ts <TICKER>` | Compound OS: pull a ticker's `FinancialFact` rows (see [Compound OS pipeline](#compound-os-pipeline)) |
+| `npx tsx scripts/run-report.ts <TICKER>` | Compound OS: run the full agent pipeline for a ticker and save a `ResearchReport` |
 | `npx prisma studio` | Browse the database |
 
 ## Data source
@@ -66,14 +70,24 @@ The `yahoo-finance2` version in `package.json` is pinned (no `^`) rather than le
 
 ## Deep reports
 
-The "Generate report" button on a stock page calls the Anthropic API (`claude-opus-5`) on **your own key** — set `ANTHROPIC_API_KEY` in `.env`. It's on-demand only (never run in bulk or on a schedule) since it's a paid-per-call feature. Reports combine cached fundamentals with any notes you've synced for that ticker via `npm run sync-notes`.
+The "Generate report" button on a stock page (`lib/deep-report.ts`) is on-demand only (never run in bulk or on a schedule) and combines cached fundamentals with any notes you've synced for that ticker via `npm run sync-notes`. Falls back through 3 backends, same fallback chain as the Compound OS pipeline: the Anthropic API (`claude-opus-5`) if `ANTHROPIC_API_KEY` is set in `.env` (most control — e.g. adaptive thinking isn't available via the CLI) → the local `claude` CLI (free, no key) → Ollama as a last resort if `claude` itself isn't installed/logged in. **No key required** unless you specifically want the Anthropic-API path.
+
+## Compound OS pipeline
+
+A second, newer AI system alongside the single-shot Deep report above: `RawSource -> FinancialFact -> AnalysisOutput -> ResearchReport` (see `prisma/schema.prisma`'s "Compound OS" block — `QualityGateLog`/`KnowledgeNote` are scaffolded there for a planned fuller quality-gate + Obsidian-feedback loop, not implemented yet beyond the schema).
+
+- `scripts/ingest.ts <TICKER>` — pulls Yahoo + SEC/ก.ล.ต. data into `FinancialFact` rows (includes analyst consensus estimates via `mapYahooEarningsTrendFacts`). No AI, 0 tokens.
+- `.claude/agents/analysis/*.md` — one markdown prompt per report section (valuation, risk, moat, business, growth, synthesis), run via `lib/agents/runner.ts`'s `runAgent()`: loads facts, calls whichever provider `AGENT_PROVIDER` resolves to, validates the JSON against a zod schema (`lib/report/schema.ts`), retries with the validation errors fed back on failure. `estimates` is a plain function (`lib/report/estimates.ts`), not an agent — turning consensus facts into `EstimateBlock[]` needs no judgment.
+- `lib/report/orchestrator.ts` (`scripts/run-report.ts <TICKER>`) — runs every agent for a ticker in dependency order, assembles a full `StockReport`, validates completeness, and saves a `ResearchReport` row on success.
+- Grounding checks (`lib/agents/grounding.ts`) catch a model citing a number/id not actually backed by a real `FinancialFact` row — every provider tested so far (including `claude-cli`) has needed this at least once; see `docs/eval/*.md` for the specifics per agent.
+- `AGENT_PROVIDER` (`.env`): `claude-cli` (default — local `claude` CLI, headless, no API key) | `gemini` (fallback, free tier, `GEMINI_API_KEY`) | `groq` | `ollama` (test-structure only, not for real use — see `resolveProvider`'s warning) | `xai` | `anthropic` (paid).
 
 ## Deploying
 
-1. Provision a real Postgres (Neon, or Prisma's own hosted Postgres via `npx create-db`) and set `DATABASE_URL` (pooled) / `DIRECT_URL` (direct) accordingly on your hosting platform.
-2. Generate a baseline migration against that database (`npx prisma migrate dev --create-only`) and commit it.
-3. Deploy the Next.js app (Vercel is the natural fit).
-4. Add a `DIRECT_URL` repository secret in GitHub so `.github/workflows/refresh.yml` can run the daily refresh job. The workflow already exists — it just needs the secret to point at production instead of local dev.
-5. Set `ANTHROPIC_API_KEY` and `NEXTAUTH_SECRET` (a fresh one, not the dev value) as environment variables on the hosting platform.
+**Runs on this machine, not Vercel** — the app, the local Postgres (`prisma dev`), and the Compound OS pipeline (via the local `claude` CLI) are all local. Nothing here needs `ANTHROPIC_API_KEY`, a cloud Postgres, or a Vercel account.
 
-`npm run sync-notes` stays a local-only command you run from your own machine whenever your notes change — it's never part of deployment.
+- **Web app**: `npm run build && npm run start` (or just `npm run dev` for a personal single-user setup) on this machine, kept running (e.g. as a Windows service, or just a terminal you leave open).
+- **Daily refresh** (`scripts/refresh-universe.ts`): scheduled locally via **Windows Task Scheduler** instead of `.github/workflows/refresh.yml` — that GitHub Actions workflow still exists and still works if you ever do move to a cloud Postgres, but isn't what's actually scheduled right now.
+- **Deep reports** (the old single-shot feature): same fallback chain as the Compound OS pipeline now — no key needed unless you want the Anthropic-API path specifically (see [Deep reports](#deep-reports)).
+- **`npm run sync-notes`**: reads an Obsidian vault (`OBSIDIAN_VAULT_PATH`) into the `Note` table — always local-only regardless of deploy target, since it needs filesystem access to the vault.
+- **Obsidian export** (`lib/report/obsidian-export.ts`): `scripts/run-report.ts` writes a `StockReport` into the real vault (`OBSIDIAN_VAULT_PATH`) as `09_Investment_Thesis/<Market>/<TICKER> - <date>.md` — full markdown (thesis, kill criteria, bulls/bears, business summary, fundamentals tables, moat, risk factors, growth drivers, consensus estimates), dated filenames so re-running later doesn't overwrite prior history. Gated on `checkStockReportGrounding()` (`lib/agents/grounding.ts`), not just `validateReport()` — a live run proved schema-valid isn't the same as citation-clean (see `docs/eval/risk.md`/`synthesis.md`, 2026-08-20), so a report with a real grounding issue still gets saved to `ResearchReport` (for review — this pipeline costs real money per run) but is *not* written into the vault until it's clean. `ResearchReport.obsidianPath` records the path when export did happen. Skipped (not failed) if `OBSIDIAN_VAULT_PATH` isn't set — same as `sync-notes.ts`. A Vercel-hosted instance couldn't do any of this (no filesystem access to a local vault), same reasoning `ollama`/`claude-cli` have no serverless equivalent.

@@ -1,9 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
+import * as claudeCli from "./agents/providers/claude-cli";
 
-// On-demand only (never run in bulk across the universe). Uses Claude when ANTHROPIC_API_KEY is
-// set (costs real money per call, see .env) — otherwise falls back to a local Ollama model for
-// free testing. Ollama has no production equivalent (Vercel can't host a persistent Ollama
-// daemon), so the fallback only ever applies to local dev; deployed instances need a real key.
+// On-demand only (never run in bulk across the universe). Deploy target moved to this machine
+// (not Vercel — see README.md's "Compound OS pipeline"/"Deploying" sections), so the old
+// Vercel-can't-host-Ollama reasoning for the fallback chain no longer applies, but the chain
+// itself is still useful: prefer the Anthropic API if the user has paid-key access set up
+// (ANTHROPIC_API_KEY — most control, e.g. `thinking: adaptive` isn't available via the CLI), else
+// the local `claude` CLI (free, no key, same provider used by the Compound OS pipeline — see
+// lib/agents/providers/claude-cli.ts), else Ollama as a last resort if `claude` itself isn't
+// installed/logged in.
 const DEEP_REPORT_MODEL = "claude-opus-5";
 const OLLAMA_HOST = process.env.OLLAMA_HOST ?? "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "qwen3:8b";
@@ -134,10 +139,25 @@ async function generateWithClaude(prompt: string): Promise<{ content: string; mo
   return { content: text, model: message.model };
 }
 
+async function generateWithClaudeCli(prompt: string): Promise<{ content: string; model: string }> {
+  // No jsonSchema passed — this is prose, not a structured section (see claude-cli.ts's generate():
+  // omitting the 3rd arg falls back to returning the raw --output-format json `.result` text).
+  const content = await claudeCli.generate("You are a careful investment research writer. Follow the user's instructions exactly.", prompt);
+  return { content, model: `claude-cli/${claudeCli.MODEL_NAME}` };
+}
+
 export async function generateDeepReport(
   stock: DeepReportStockInput,
   notes: DeepReportNoteInput[],
 ): Promise<{ content: string; model: string }> {
   const prompt = buildDeepReportPrompt(stock, notes);
-  return process.env.ANTHROPIC_API_KEY ? generateWithClaude(prompt) : generateWithOllama(prompt);
+  if (process.env.ANTHROPIC_API_KEY) return generateWithClaude(prompt);
+  try {
+    return await generateWithClaudeCli(prompt);
+  } catch (e) {
+    // `claude` not installed/not logged in, or some other CLI-side failure — fall back rather than
+    // fail the whole request, same reasoning the old ANTHROPIC_API_KEY-absent path already had.
+    console.warn(`deep-report: claude-cli failed, falling back to ollama — ${(e as Error).message}`);
+    return generateWithOllama(prompt);
+  }
 }

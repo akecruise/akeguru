@@ -6,7 +6,7 @@ export const yahooFinance = new YahooFinance({
   queue: { concurrency: 2, interval: 250 },
 });
 
-export type MarketCode = "TH" | "US";
+export type MarketCode = "TH" | "US" | "HK";
 
 export interface FetchedStock {
   name?: string;
@@ -185,12 +185,18 @@ function numOrNull(v: unknown): number | null {
   return typeof v === "number" ? v : null;
 }
 
-/** THB per 1 USD -> multiplier to convert a THB amount to USD (1 for US tickers, called by the refresh job). */
+const FX_SYMBOL: Partial<Record<MarketCode, string>> = {
+  TH: "THB=X",
+  HK: "HKD=X",
+};
+
+/** Local-currency-per-1-USD -> multiplier to convert a native-currency amount to USD (1 for US tickers, called by the refresh job). */
 export async function fetchFxRateToUsd(market: MarketCode): Promise<number> {
-  if (market === "US") return 1;
-  const q = await yahooFinance.quote("THB=X");
+  const symbol = FX_SYMBOL[market];
+  if (!symbol) return 1;
+  const q = await yahooFinance.quote(symbol);
   const rate = q?.regularMarketPrice;
-  if (!rate) throw new Error("Could not fetch THB=X FX rate");
+  if (!rate) throw new Error(`Could not fetch ${symbol} FX rate`);
   return 1 / rate;
 }
 

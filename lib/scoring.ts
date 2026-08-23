@@ -176,7 +176,7 @@ function payoutRatioBandScore(ratio: number): number {
 }
 
 /**
- * Scores one market cohort (already filtered to a single Market by the caller — TH and US
+ * Scores one market cohort (already filtered to a single Market by the caller — TH, US, and HK
  * are never percentile-ranked against each other). Metrics with fewer than MIN_COHORT_SIZE
  * non-null values across the whole cohort are dropped for every stock, not just flagged per-stock.
  */

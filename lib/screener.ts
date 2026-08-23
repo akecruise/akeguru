@@ -16,7 +16,7 @@ export type ScreenerSortField = (typeof SCREENER_SORT_FIELDS)[number];
 // Shared by the /screener page (SSR, direct call) and /api/screener (HTTP callers) so the
 // two never drift on what counts as a valid filter.
 export const screenerFiltersSchema = z.object({
-  market: z.enum(["TH", "US"]).optional(),
+  market: z.enum(["TH", "US", "HK"]).optional(),
   sector: z.string().min(1).optional(),
   peMin: z.coerce.number().optional(),
   peMax: z.coerce.number().optional(),

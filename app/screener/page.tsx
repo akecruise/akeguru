@@ -70,6 +70,7 @@ export default async function ScreenerPage({
             <option value="">All</option>
             <option value="TH">Thailand</option>
             <option value="US">US</option>
+            <option value="HK">Hong Kong</option>
           </select>
         </label>
         <label className={labelClass}>
@@ -203,7 +204,7 @@ export default async function ScreenerPage({
 
       {priceFilterIgnored && (
         <p className="mt-3 text-sm text-amber-700 dark:text-amber-400">
-          Price filter ignored — select a single market to filter by price (THB and USD prices aren&apos;t comparable).
+          Price filter ignored — select a single market to filter by price (THB, USD, and HKD prices aren&apos;t comparable).
         </p>
       )}
 

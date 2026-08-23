@@ -2,6 +2,7 @@ import pLimit from "p-limit";
 import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import { UNIVERSE_TH } from "./data/universe-th";
 import { UNIVERSE_US } from "./data/universe-us";
+import { UNIVERSE_HK } from "./data/universe-hk";
 import {
   fetchStockQuoteSummary,
   fetchFinancialHistory,
@@ -22,6 +23,9 @@ const RETRY_BASE_MS = 1000;
 const RETRY_MAX_MS = 30_000;
 const CIRCUIT_BREAKER_MIN_PROCESSED = 20;
 const CIRCUIT_BREAKER_FAILURE_RATIO = 0.2;
+
+const DEFAULT_CURRENCY: Record<MarketCode, string> = { TH: "THB", US: "USD", HK: "HKD" };
+const DEFAULT_EXCHANGE: Record<MarketCode, string> = { TH: "SET", US: "UNKNOWN", HK: "HKEX" };
 
 async function withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
   let lastErr: unknown;
@@ -56,7 +60,7 @@ async function refreshTicker(
 ): Promise<void> {
   const fetched = await withRetry(() => fetchStockQuoteSummary(ticker), `quoteSummary(${ticker})`);
 
-  const currency = fetched.currency ?? (market === "TH" ? "THB" : "USD");
+  const currency = fetched.currency ?? DEFAULT_CURRENCY[market];
   const marketCapUsd = fetched.marketCap != null ? fetched.marketCap * fxRateToUsd : undefined;
   // Confirmed non-payer (summaryDetail returned but no yield) -> write 0, not null, so scoring
   // never needs a dividend-specific "missing vs. zero" branch. A whole-ticker fetch failure
@@ -119,7 +123,7 @@ async function refreshTicker(
     create: {
       ticker,
       market,
-      exchange: fetched.exchange ?? (market === "TH" ? "SET" : "UNKNOWN"),
+      exchange: fetched.exchange ?? DEFAULT_EXCHANGE[market],
       name: fetched.name ?? ticker,
       currency,
       ...updateData,
@@ -299,11 +303,13 @@ export async function runRefresh(prisma: PrismaClient): Promise<RefreshResult> {
   const tickers: Array<{ ticker: string; market: MarketCode }> = [
     ...UNIVERSE_TH.map((ticker) => ({ ticker, market: "TH" as const })),
     ...UNIVERSE_US.map((ticker) => ({ ticker, market: "US" as const })),
+    ...UNIVERSE_HK.map((ticker) => ({ ticker, market: "HK" as const })),
   ];
 
   const fxRates: Record<MarketCode, number> = {
     TH: await fetchFxRateToUsd("TH"),
     US: 1,
+    HK: await fetchFxRateToUsd("HK"),
   };
 
   const limit = pLimit(CONCURRENCY);
@@ -335,6 +341,7 @@ export async function runRefresh(prisma: PrismaClient): Promise<RefreshResult> {
   try {
     await scoreMarket(prisma, "TH");
     await scoreMarket(prisma, "US");
+    await scoreMarket(prisma, "HK");
   } catch (err) {
     console.error("[refresh] scoring pass failed:", err);
   }
