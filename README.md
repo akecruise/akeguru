@@ -66,6 +66,8 @@ npm run refresh          # pull fundamentals for the curated ticker universe fro
 
 > **Note on `prisma db push` vs `prisma migrate dev`**: the local `prisma dev` engine doesn't support a genuine second (shadow) database, so `prisma migrate dev` fails there. Local iteration uses `db push` instead. When deploying against a real Postgres (Neon, Prisma Postgres, etc.), generate a proper baseline migration there with `prisma migrate dev --create-only`.
 
+**Design system**: the whole app was redesigned to a dashboard/card style — shared primitives live in `components/ui/` (`Card`/`CardHeading` for the bordered-card container, with an optional colored left-border `accent` prop keyed to a decision; `Badge` + `decisionToVariant`/`gateStatusToVariant` for the GO/WAIT/NO_GO and APPROVED/REJECTED/PENDING pills used consistently on the dashboard, screener, watchlist, and stock pages; `StatTile` for the small label/value tiles in the stock page's stat grids). Theme tokens (`--background`, `--card`, `--card-border`, `--accent`, `--accent-foreground`) live in `app/globals.css` and are registered into Tailwind via `@theme inline`, so `bg-card`, `border-card-border`, `bg-accent`, etc. are real utility classes — extending the existing `@media (prefers-color-scheme: dark)` block rather than introducing a new dark-mode strategy, so it stays consistent with every pre-existing `dark:` class in the codebase. The home page (`app/page.tsx`) changed from a raw, unfiltered dump of every cached ticker into an actual dashboard: tracked-stock count, research-verdict count, market regime per market, and the most recent research verdicts as color-coded cards.
+
 ### 3. Run the app
 
 ```bash

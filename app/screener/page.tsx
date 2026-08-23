@@ -2,6 +2,8 @@ import Link from "next/link";
 import { queryScreener, parseScreenerFilters, listSectors, SCREENER_SORT_FIELDS, LYNCH_CATEGORIES } from "@/lib/screener";
 import { rankStocks, rankingWeightsSchema, DEFAULT_RANKING_WEIGHTS } from "@/lib/ranking";
 import { isLynchBuyCandidate } from "@/lib/lynch";
+import { Card } from "@/components/ui/Card";
+import { Badge } from "@/components/ui/Badge";
 
 const LYNCH_CATEGORY_LABEL: Record<(typeof LYNCH_CATEGORIES)[number], string> = {
   fast_grower: "Fast Grower",
@@ -28,6 +30,14 @@ function fmtCompact(v: number | null | undefined): string {
 const inputClass =
   "w-full rounded-md border border-black/15 px-2 py-1.5 text-sm dark:border-white/20 dark:bg-transparent";
 const labelClass = "flex flex-col gap-1 text-xs text-black/60 dark:text-white/60";
+
+// Quick-scan color coding for the Snowflake score column -- not a new signal, just a visual shortcut
+// onto the same 0-100 score every row already computes.
+function scoreVariant(score: number): "go" | "wait" | "no_go" {
+  if (score >= 70) return "go";
+  if (score >= 40) return "wait";
+  return "no_go";
+}
 
 export default async function ScreenerPage({
   searchParams,
@@ -71,7 +81,7 @@ export default async function ScreenerPage({
         Filters read straight from the daily-refreshed cache — no live fetches.
       </p>
 
-      <form method="get" className="mt-6 grid grid-cols-2 gap-3 rounded-lg border border-black/10 p-4 sm:grid-cols-4 dark:border-white/15">
+      <form method="get" className="mt-6 grid grid-cols-2 gap-3 rounded-xl border border-card-border bg-card p-4 shadow-sm sm:grid-cols-4">
         <label className={labelClass}>
           Market
           <select name="market" defaultValue={s("market")} className={inputClass}>
@@ -216,7 +226,7 @@ export default async function ScreenerPage({
           />
         </label>
         <div className="col-span-2 flex items-end gap-2 sm:col-span-4">
-          <button type="submit" className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background">
+          <button type="submit" className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:opacity-90">
             Filter
           </button>
           <Link href="/screener" className="text-sm text-black/50 hover:text-black dark:text-white/50 dark:hover:text-white">
@@ -233,11 +243,11 @@ export default async function ScreenerPage({
 
       <p className="mt-6 text-sm text-black/50 dark:text-white/50">{stocks.length} result{stocks.length === 1 ? "" : "s"}</p>
 
-      <div className="mt-3 overflow-x-auto">
+      <Card className="mt-3 overflow-x-auto p-0">
         <table className="w-full text-sm tabular-nums">
           <thead>
-            <tr className="border-b border-black/10 text-left text-black/50 dark:border-white/15 dark:text-white/50">
-              <th className="py-2 pr-4 font-medium">Ticker</th>
+            <tr className="border-b border-card-border text-left text-black/50 dark:text-white/50">
+              <th className="py-2 pl-4 pr-4 font-medium">Ticker</th>
               <th className="py-2 pr-4 font-medium">Sector</th>
               <th className="py-2 pr-4 font-medium">Price</th>
               <th className="py-2 pr-4 font-medium">Market Cap (USD)</th>
@@ -253,8 +263,8 @@ export default async function ScreenerPage({
           </thead>
           <tbody>
             {stocks.map((stock) => (
-              <tr key={stock.id} className="border-b border-black/5 hover:bg-black/[.02] dark:border-white/10 dark:hover:bg-white/[.04]">
-                <td className="py-2 pr-4">
+              <tr key={stock.id} className="border-b border-card-border/60 last:border-0 hover:bg-black/[.02] dark:hover:bg-white/[.04]">
+                <td className="py-2 pl-4 pr-4">
                   <Link href={`/stock/${stock.ticker}`} className="hover:underline">
                     <span className="font-medium">{stock.ticker}</span>
                     <span className="ml-2 text-black/50 dark:text-white/50">{stock.name}</span>
@@ -269,7 +279,13 @@ export default async function ScreenerPage({
                 <td className="py-2 pr-4">{fmtPct(stock.roe)}</td>
                 <td className="py-2 pr-4">{fmtPct(stock.dividendYield)}</td>
                 <td className="py-2 pr-4">{fmtNum(stock.debtToEquity, { maximumFractionDigits: 2 })}</td>
-                <td className="py-2 pr-4">{stock.latestOverallScore != null ? Math.round(stock.latestOverallScore) : "—"}</td>
+                <td className="py-2 pr-4">
+                  {stock.latestOverallScore != null ? (
+                    <Badge text={String(Math.round(stock.latestOverallScore))} variant={scoreVariant(stock.latestOverallScore)} />
+                  ) : (
+                    "—"
+                  )}
+                </td>
                 <td className="py-2 pr-4 text-black/60 dark:text-white/60">
                   {stock.lynchCategory ? LYNCH_CATEGORY_LABEL[stock.lynchCategory as keyof typeof LYNCH_CATEGORY_LABEL] : "—"}
                 </td>
@@ -291,7 +307,7 @@ export default async function ScreenerPage({
         {stocks.length === 0 && (
           <p className="py-8 text-center text-sm text-black/50 dark:text-white/50">No stocks match these filters.</p>
         )}
-      </div>
+      </Card>
     </main>
   );
 }

@@ -6,9 +6,10 @@ export async function Nav() {
   const user = await getSessionUser();
 
   return (
-    <header className="border-b border-black/10 dark:border-white/15">
+    <header className="sticky top-0 z-10 border-b border-card-border bg-background/80 backdrop-blur">
       <nav className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-2 px-6 py-3">
-        <Link href="/" className="font-semibold">
+        <Link href="/" className="flex items-center gap-2 font-semibold">
+          <span className="inline-block h-2.5 w-2.5 rounded-full bg-accent" />
           akeguru
         </Link>
         <div className="flex flex-wrap items-center gap-4 text-sm">
@@ -24,7 +25,10 @@ export async function Nav() {
               <SignOutButton />
             </>
           ) : (
-            <Link href="/login" className="text-black/60 hover:text-black dark:text-white/60 dark:hover:text-white">
+            <Link
+              href="/login"
+              className="rounded-md bg-accent px-3 py-1.5 font-medium text-accent-foreground hover:opacity-90"
+            >
               Sign in
             </Link>
           )}
