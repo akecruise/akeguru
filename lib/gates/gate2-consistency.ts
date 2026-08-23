@@ -17,6 +17,7 @@ import type { GateOutcome } from "./types";
 
 export function gate2Consistency(report: StockReport, realFacts: RealFact[]): GateOutcome {
   const triggersResult = checkInvalidationTriggers(report.verdict.invalidationTriggers, realFacts);
+  const confirmationResult = checkInvalidationTriggers(report.verdict.confirmationTriggers, realFacts);
 
   const sections: Record<string, { ok: boolean; checkedCount: number; issues: Array<{ title: string; reason: string; detail: string }> }> = {
     riskFactors: checkBulletGrounding(report.riskFactors, realFacts),
@@ -30,6 +31,11 @@ export function gate2Consistency(report: StockReport, realFacts: RealFact[]): Ga
       ok: triggersResult.ok,
       checkedCount: triggersResult.checkedCount,
       issues: triggersResult.issues.map((i) => ({ title: i.description, reason: i.reason, detail: i.detail })),
+    },
+    confirmationTriggers: {
+      ok: confirmationResult.ok,
+      checkedCount: confirmationResult.checkedCount,
+      issues: confirmationResult.issues.map((i) => ({ title: i.description, reason: i.reason, detail: i.detail })),
     },
   };
 

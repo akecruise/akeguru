@@ -33,6 +33,7 @@ interface Output {
     thesis: string;          // สรุปเหตุผลของ decision โดยชั่งน้ำหนัก bulls vs bears (ไม่ใช่ทวน bulls ข้อเดียว)
     killCriteria: string[];  // เงื่อนไขที่ทำให้เปลี่ยนใจ — ต้องเป็นรูปธรรม ตรวจสอบได้ ผูกกับ riskFactors/fundamentals ที่ให้มา
     invalidationTriggers: InvalidationTrigger[]; // อย่างน้อย 1 — เวอร์ชัน "วัดได้จริง" ของ killCriteria (ดูกฎข้อ 10)
+    confirmationTriggers: InvalidationTrigger[]; // บังคับอย่างน้อย 1 ข้อ **เฉพาะเมื่อ decision = 'WAIT'** เท่านั้น — ดูกฎข้อ 11
     reviewDate: string;      // ISO date — วันที่ควรกลับมาทบทวนใหม่ (ดูกฎข้อ 6 — บังคับ >= วันนี้ + 90 วัน)
   };
 }
@@ -60,3 +61,4 @@ interface ClaimItem {
 8. `decision: 'GO'` ต้องมี conviction >= 3 เท่านั้น (จะ GO ทั้งที่ไม่มั่นใจไม่สมเหตุสมผล) — ถ้าข้อมูลก้ำกึ่งจริงๆ ให้เลือก `WAIT` แทนการฝืน GO ด้วย conviction ต่ำ
 9. ห้ามมี `bulls` หรือ `bears` ข้อไหนพูดเรื่องเดียวกันซ้ำ (แค่ใช้คำต่างกัน) — แต่ละข้อต้องเป็นมุมที่ต่างกันจริง
 10. `verdict.invalidationTriggers` **ต้องมีอย่างน้อย 1 ข้อ และ `metricName` ต้องเป็นชื่อ metric ที่ปรากฏอยู่จริงใน FinancialFact ที่ให้มาเท่านั้น** — จะถูกตรวจแบบเดียวกับ `supportingFactIds` (metricName ที่ไม่มีอยู่จริงจะถูก reject กลับมาให้แก้) ส่วนใหญ่ควรดึงมาจากเงื่อนไขเดียวกับที่พูดไว้ใน `killCriteria` ข้อใดข้อหนึ่ง แค่แปลงเป็นรูปแบบวัดได้ (metric + comparator + threshold) แทนประโยคยาว — เช่น killCriteria พูดว่า "ถ้า Debt/Equity ขึ้นเกิน 0.5x" ก็ใส่ `{ metricName: "Debt/Equity", comparator: "gt", threshold: 0.5 }` ถ้า killCriteria ข้อไหนไม่มี metric ที่จับต้องได้ (เช่น "ถ้าผู้บริหารเปลี่ยนทิศทางธุรกิจ") ก็ไม่ต้องแปลงข้อนั้น แต่ต้องมีอย่างน้อย 1 ข้อในทั้งหมดที่แปลงได้
+11. **ถ้า `decision: 'WAIT'` เท่านั้น** — `verdict.confirmationTriggers` ต้องมีอย่างน้อย 1 ข้อ รูปแบบเดียวกับ `InvalidationTrigger` เป๊ะ (metricName ต้องมีอยู่จริงเหมือนกฎข้อ 10) แต่**ทิศทางตรงข้าม**: invalidationTriggers ตอบว่า "อะไรทำให้เลิกสนใจหุ้นนี้" ส่วน confirmationTriggers ตอบว่า **"อะไรจะยืนยันว่าควรเปลี่ยนจาก WAIT เป็น GO"** — เช่นถ้า thesis บอกว่า "ราคาแพงเกินไปตอนนี้ รอ valuation ย่อตัว" ก็ใส่ `{ metricName: "P/E (TTM)", comparator: "lt", threshold: 25, description: "P/E ย่อลงมาต่ำกว่า 25x" }` ห้ามใส่เงื่อนไขที่จับต้องไม่ได้ (เช่น "ตลาดดีขึ้น" ลอยๆ) ถ้า `decision` เป็น `'GO'` หรือ `'NO_GO'` ให้ใส่ `confirmationTriggers: []` (ตัดสินใจแล้ว ไม่มีอะไรต้องรอยืนยันเพิ่ม)

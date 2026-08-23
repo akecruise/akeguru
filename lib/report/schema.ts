@@ -171,6 +171,11 @@ export const VerdictSchema = z.object({
   thesis: z.string().min(20),
   killCriteria: z.array(z.string()).min(1),   // ต้องบอกได้ว่าอะไรทำให้เปลี่ยนใจ
   invalidationTriggers: z.array(InvalidationTriggerSchema).min(1),
+  // Phase 4 ("Leading Indicator Agent", "WAIT ต้องมี trigger เฝ้าได้"): the positive counterpart of
+  // invalidationTriggers -- same measurable shape (real metricName + comparator/threshold), but
+  // answers "what would confirm moving WAIT -> GO" instead of "what breaks the thesis". Only
+  // meaningful for a WAIT (GO/NO_GO already decided, nothing left to confirm into), enforced below.
+  confirmationTriggers: z.array(InvalidationTriggerSchema).default([]),
   reviewDate: z.string(),
 }).refine(
   v => {
@@ -181,6 +186,9 @@ export const VerdictSchema = z.object({
   // hard-enforced, not just a prompt instruction: a live eval (docs/eval/synthesis.md) showed both
   // ollama runs return today's date verbatim despite the prompt asking for +90 days
   { message: 'Gate: reviewDate ต้องเป็นวันที่ตั้งแต่วันนี้ + 90 วันขึ้นไป (ISO date, YYYY-MM-DD)' }
+).refine(
+  v => v.decision !== 'WAIT' || v.confirmationTriggers.length >= 1,
+  { message: 'Gate: decision=WAIT ต้องมี confirmationTriggers อย่างน้อย 1 ตัว (อะไรจะยืนยันว่าเปลี่ยนจาก WAIT เป็น GO)' }
 );
 
 // ---------- 13b ----------

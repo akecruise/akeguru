@@ -46,6 +46,10 @@ interface Row {
   regret: boolean;
   triggersTotal: number;
   firedTriggers: Array<InvalidationTrigger & { currentValue: number }>;
+  // Phase 4 ("Leading Indicator Agent") — the positive counterpart: a WAIT whose confirmationTriggers
+  // fired is a "look again, might be time to GO" signal, not a "thesis broke" signal like
+  // firedTriggers above. Only ever populated for WAIT (confirmationTriggers is empty on GO/NO_GO).
+  firedConfirmations: Array<InvalidationTrigger & { currentValue: number }>;
   regimeAtVerdict: string | null;
   regimeNow: string | null;
   regimeShifted: boolean;
@@ -150,6 +154,15 @@ async function main() {
       }
     }
 
+    const confirmations = verdict?.confirmationTriggers ?? [];
+    const firedConfirmations: Row["firedConfirmations"] = [];
+    for (const t of confirmations) {
+      const currentValue = await latestFactValue(r.ticker, t.metricName);
+      if (currentValue !== null && comparatorFires(t.comparator, currentValue, t.threshold)) {
+        firedConfirmations.push({ ...t, currentValue });
+      }
+    }
+
     const market = MARKET_BY_EXCHANGE[r.exchange] ?? null;
     const regimeAtVerdict = market ? await regimeOnOrBefore(market, r.dataAsOf) : null;
     const regimeNow = market ? await latestRegime(market) : null;
@@ -167,6 +180,7 @@ async function main() {
       returnPct,
       triggersTotal: triggers.length,
       firedTriggers,
+      firedConfirmations,
       regimeAtVerdict,
       regimeNow,
       regimeShifted,
@@ -180,14 +194,15 @@ async function main() {
   const fmtPct = (v: number | null) => (v === null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`);
 
   console.log(
-    "| ticker | decision | conv | dataAsOf | days | price@verdict | current | return | past review | gate | regret | triggers | regime@verdict | regime now |",
+    "| ticker | decision | conv | dataAsOf | days | price@verdict | current | return | past review | gate | regret | triggers | confirm | regime@verdict | regime now |",
   );
-  console.log("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+  console.log("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
   for (const row of rows) {
     const triggersCell = row.firedTriggers.length ? `🔴 ${row.firedTriggers.length}/${row.triggersTotal} fired` : `${row.triggersTotal}`;
+    const confirmCell = row.firedConfirmations.length ? `🟢 ${row.firedConfirmations.length} ready` : "";
     const regimeNowCell = row.regimeShifted ? `🔄 ${row.regimeNow ?? "—"}` : (row.regimeNow ?? "—");
     console.log(
-      `| ${row.ticker} | ${row.decision} | ${row.conviction} | ${row.dataAsOf.toISOString().slice(0, 10)} | ${row.daysSince} | ${fmtPrice(row.priceAtVerdict)} | ${fmtPrice(row.currentPrice)} | ${fmtPct(row.returnPct)} | ${row.pastReviewDate ? "⚠ yes" : "no"} | ${row.gateStatus} | ${row.regret ? "🔴 REGRET" : ""} | ${triggersCell} | ${row.regimeAtVerdict ?? "—"} | ${regimeNowCell} |`,
+      `| ${row.ticker} | ${row.decision} | ${row.conviction} | ${row.dataAsOf.toISOString().slice(0, 10)} | ${row.daysSince} | ${fmtPrice(row.priceAtVerdict)} | ${fmtPrice(row.currentPrice)} | ${fmtPct(row.returnPct)} | ${row.pastReviewDate ? "⚠ yes" : "no"} | ${row.gateStatus} | ${row.regret ? "🔴 REGRET" : ""} | ${triggersCell} | ${confirmCell} | ${row.regimeAtVerdict ?? "—"} | ${regimeNowCell} |`,
     );
   }
 
@@ -202,6 +217,19 @@ async function main() {
   console.log(`\n${totalFired} invalidation trigger(s) fired across ${triggeredRows.length} report(s):`);
   for (const r of triggeredRows) {
     for (const t of r.firedTriggers) {
+      console.log(`  ${r.ticker} (${r.decision} on ${r.dataAsOf.toISOString().slice(0, 10)}): ${t.description} — ${t.metricName}=${t.currentValue.toLocaleString()} ${t.comparator} ${t.threshold.toLocaleString()}`);
+    }
+  }
+
+  // Phase 4 ("Leading Indicator Agent") — the WAIT-side counterpart of the fired-invalidationTriggers
+  // block above: a fired confirmationTrigger means the specific condition the synthesis agent said
+  // would confirm moving WAIT -> GO has actually happened, so this WAIT is worth a human re-look now
+  // rather than waiting for reviewDate. Doesn't auto-flip the decision -- still needs a real rerun.
+  const confirmedRows = rows.filter((r) => r.firedConfirmations.length > 0);
+  const totalConfirmed = confirmedRows.reduce((sum, r) => sum + r.firedConfirmations.length, 0);
+  console.log(`\n${totalConfirmed} confirmation trigger(s) fired across ${confirmedRows.length} WAIT report(s) — worth a re-look now:`);
+  for (const r of confirmedRows) {
+    for (const t of r.firedConfirmations) {
       console.log(`  ${r.ticker} (${r.decision} on ${r.dataAsOf.toISOString().slice(0, 10)}): ${t.description} — ${t.metricName}=${t.currentValue.toLocaleString()} ${t.comparator} ${t.threshold.toLocaleString()}`);
     }
   }

@@ -178,6 +178,7 @@ export function renderStockReportMarkdown(report: StockReport): string {
     `## Expectation Gap (reverse DCF)\n\n${renderExpectationGap(report.expectationGap)}`,
     `## Kill Criteria\n\n${verdict.killCriteria.map((k) => `- ${k}`).join("\n")}`,
     `## Invalidation Triggers\n\n${renderInvalidationTriggers(verdict.invalidationTriggers)}`,
+    ...(verdict.confirmationTriggers.length ? [`## Confirmation Triggers (WAIT → GO)\n\n${renderInvalidationTriggers(verdict.confirmationTriggers)}`] : []),
     `## Bulls\n\n${renderClaims(report.bulls)}`,
     `## Bears\n\n${renderClaims(report.bears)}`,
     `## Business Summary\n\n${renderClaims(report.businessSummary)}`,

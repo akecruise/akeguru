@@ -185,6 +185,11 @@ export interface Verdict {
   thesis: string;
   killCriteria: string[];
   invalidationTriggers: InvalidationTrigger[];
+  // Phase 4 ("Leading Indicator Agent") — same shape as InvalidationTrigger, opposite direction:
+  // what would confirm moving WAIT -> GO, not what breaks the thesis. Required (>=1) when
+  // decision === 'WAIT', enforced by VerdictSchema's refine (lib/report/schema.ts); empty for
+  // GO/NO_GO, which have already decided.
+  confirmationTriggers: InvalidationTrigger[];
   reviewDate: string;
 }
 

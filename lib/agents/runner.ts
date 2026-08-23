@@ -171,9 +171,11 @@ function groundingIssuesForSection(section: SectionName, data: unknown, realFact
       const s = data as Synthesis;
       const claimIssues = [...checkClaimGrounding(s.bulls, realFacts).issues, ...checkClaimGrounding(s.bears, realFacts).issues];
       const triggerIssues = checkInvalidationTriggers(s.verdict.invalidationTriggers, realFacts).issues;
+      const confirmationIssues = checkInvalidationTriggers(s.verdict.confirmationTriggers, realFacts).issues;
       return [
         ...claimIssues.map((i) => `"${i.title}": ${i.reason} — ${i.detail}`),
         ...triggerIssues.map((i) => `invalidationTrigger "${i.description}": ${i.reason} — ${i.detail}`),
+        ...confirmationIssues.map((i) => `confirmationTrigger "${i.description}": ${i.reason} — ${i.detail}`),
       ];
     }
     default:

@@ -106,6 +106,15 @@ export function printReport(report: StockReport): string {
   }
   out.push("");
 
+  if (verdict.confirmationTriggers.length) {
+    out.push("Confirmation triggers (WAIT -> GO):");
+    for (const t of verdict.confirmationTriggers) {
+      const cmp = { lt: "<", lte: "<=", gt: ">", gte: ">=" }[t.comparator];
+      out.push(`  - ${t.description}  [${t.metricName} ${cmp} ${t.threshold}]`);
+    }
+    out.push("");
+  }
+
   out.push(SUBRULE);
   out.push("FUNDAMENTALS");
   const f = report.fundamentals;

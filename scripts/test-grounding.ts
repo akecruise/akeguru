@@ -624,6 +624,7 @@ const MINIMAL_REPORT_WITH_ONE_BAD_RISK: StockReport = {
     thesis: "x".repeat(25),
     killCriteria: ["x"],
     invalidationTriggers: [{ description: "Revenue turns negative", metricName: "Revenue", comparator: "lt", threshold: 0 }],
+    confirmationTriggers: [{ description: "Revenue returns to growth", metricName: "Revenue", comparator: "gt", threshold: 0 }],
     reviewDate: "2027-01-01",
   },
   expectationGap: null,

@@ -90,3 +90,38 @@ const b9 = validateSection("verdict", {
   reviewDate: farEnough,
 });
 console.log("no-triggers ->", b9.ok ? "PASS (wrong!)" : "REJECT ✓");
+
+// 10. WAIT with no confirmationTriggers -> fail (Phase 4 "Leading Indicator Agent" — the positive
+// counterpart of invalidationTriggers, required only for WAIT since GO/NO_GO already decided)
+const b10 = validateSection("verdict", {
+  decision: "WAIT",
+  conviction: 3,
+  thesis: "x".repeat(25),
+  killCriteria: ["x"],
+  invalidationTriggers: sampleTriggers,
+  reviewDate: farEnough,
+});
+console.log("WAIT no-confirm ->", b10.ok ? "PASS (wrong!)" : "REJECT ✓");
+
+// 11. WAIT with confirmationTriggers -> pass
+const b11 = validateSection("verdict", {
+  decision: "WAIT",
+  conviction: 3,
+  thesis: "x".repeat(25),
+  killCriteria: ["x"],
+  invalidationTriggers: sampleTriggers,
+  confirmationTriggers: [{ description: "P/E compresses below 25x", metricName: "P/E (TTM)", comparator: "lt" as const, threshold: 25 }],
+  reviewDate: farEnough,
+});
+console.log("WAIT with-confirm ->", b11.ok ? "PASS ✓" : "REJECT (wrong!)");
+
+// 12. NO_GO with no confirmationTriggers -> still pass (only WAIT requires it)
+const b12 = validateSection("verdict", {
+  decision: "NO_GO",
+  conviction: 3,
+  thesis: "x".repeat(25),
+  killCriteria: ["x"],
+  invalidationTriggers: sampleTriggers,
+  reviewDate: farEnough,
+});
+console.log("NO_GO no-confirm ->", b12.ok ? "PASS ✓" : "REJECT (wrong!)");

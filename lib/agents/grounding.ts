@@ -442,7 +442,7 @@ export function collectReportFactIds(report: StockReport): string[] {
 }
 
 export interface StockReportGroundingIssue {
-  section: "fundamentals" | "riskFactors" | "growthDrivers" | "moat" | "factorSensitivity" | "businessSummary" | "bulls" | "bears" | "invalidationTriggers";
+  section: "fundamentals" | "riskFactors" | "growthDrivers" | "moat" | "factorSensitivity" | "businessSummary" | "bulls" | "bears" | "invalidationTriggers" | "confirmationTriggers";
   reason: string;
   title: string;
   detail: string;
@@ -479,6 +479,9 @@ export function checkStockReportGrounding(report: StockReport, realFacts: RealFa
   const bullsResult = checkClaimGrounding(report.bulls, realFacts);
   const bearsResult = checkClaimGrounding(report.bears, realFacts);
   const triggersResult = checkInvalidationTriggers(report.verdict.invalidationTriggers, realFacts);
+  // Same checker as invalidationTriggers -- identical shape (real metricName + comparator/threshold),
+  // just opposite semantic direction, so the "is metricName real" check is identical too.
+  const confirmationResult = checkInvalidationTriggers(report.verdict.confirmationTriggers, realFacts);
 
   const issues: StockReportGroundingIssue[] = [
     ...fundamentalsResult.issues.map((i) => ({ section: "fundamentals" as const, reason: i.reason, title: i.metricName, detail: i.detail })),
@@ -490,6 +493,7 @@ export function checkStockReportGrounding(report: StockReport, realFacts: RealFa
     ...bullsResult.issues.map((i) => ({ section: "bulls" as const, reason: i.reason, title: i.title, detail: i.detail })),
     ...bearsResult.issues.map((i) => ({ section: "bears" as const, reason: i.reason, title: i.title, detail: i.detail })),
     ...triggersResult.issues.map((i) => ({ section: "invalidationTriggers" as const, reason: i.reason, title: i.description, detail: i.detail })),
+    ...confirmationResult.issues.map((i) => ({ section: "confirmationTriggers" as const, reason: i.reason, title: i.description, detail: i.detail })),
   ];
 
   const checkedCount =
@@ -501,7 +505,8 @@ export function checkStockReportGrounding(report: StockReport, realFacts: RealFa
     businessResult.checkedCount +
     bullsResult.checkedCount +
     bearsResult.checkedCount +
-    triggersResult.checkedCount;
+    triggersResult.checkedCount +
+    confirmationResult.checkedCount;
 
   return { ok: issues.length === 0, checkedCount, issues };
 }
