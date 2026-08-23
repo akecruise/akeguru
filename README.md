@@ -60,6 +60,7 @@ Visit `http://localhost:3000`. Register an account to use the watchlist and deep
 | `npm run sync-notes` | **Local-only.** Syncs an Obsidian vault into the `Note` table for deep reports. Needs `OBSIDIAN_VAULT_PATH` and `NOTES_SYNC_USER_EMAIL` set (see `.env`). |
 | `npx tsx scripts/ingest.ts <TICKER>` | Compound OS: pull a ticker's `FinancialFact` rows (see [Compound OS pipeline](#compound-os-pipeline)) |
 | `npx tsx scripts/run-report.ts <TICKER>` | Compound OS: run the full agent pipeline for a ticker and save a `ResearchReport` |
+| `npx tsx scripts/scorecard.ts [TICKER]` | Verdict Scorecard: every `ResearchReport`'s decision vs. what the price did afterward, flags a WAIT that's run up 15%+ with no re-review as regret |
 | `npx prisma studio` | Browse the database |
 
 ## Data source
