@@ -5,6 +5,8 @@ import { WatchlistButton } from "@/components/WatchlistButton";
 import { SnowflakeChart } from "@/components/SnowflakeChart";
 import { DeepReportPanel } from "@/components/DeepReportPanel";
 import type { RawMetrics, DimensionDetail } from "@/lib/scoring";
+import type { StockReport, TriggerComparator } from "@/lib/report/types";
+import { computeAnnualizedVolatility, suggestPositionSize } from "@/lib/position-sizing";
 
 function fmtNum(v: number | null | undefined, opts?: Intl.NumberFormatOptions): string {
   if (v == null) return "—";
@@ -57,6 +59,41 @@ function DimensionLabel({ label, detail }: { label: string; detail: DimensionDet
   );
 }
 
+const DECISION_STYLE: Record<string, string> = {
+  GO: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  WAIT: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  NO_GO: "bg-red-500/15 text-red-700 dark:text-red-400",
+};
+
+const GATE_STATUS_STYLE: Record<string, string> = {
+  APPROVED: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  REJECTED: "bg-red-500/15 text-red-700 dark:text-red-400",
+  PENDING: "bg-black/10 text-black/60 dark:bg-white/10 dark:text-white/60",
+};
+
+function Badge({ text, styleKey, styles }: { text: string; styleKey: string; styles: Record<string, string> }) {
+  const cls = styles[styleKey] ?? "bg-black/10 text-black/60 dark:bg-white/10 dark:text-white/60";
+  return <span className={`rounded px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${cls}`}>{text}</span>;
+}
+
+const COMPARATOR_SYMBOL: Record<TriggerComparator, string> = { lt: "<", lte: "≤", gt: ">", gte: "≥" };
+
+function TriggerTable({ triggers }: { triggers: StockReport["verdict"]["invalidationTriggers"] }) {
+  if (!triggers.length) return <p className="text-sm text-black/50 dark:text-white/50">none</p>;
+  return (
+    <ul className="mt-2 space-y-1.5 text-sm">
+      {triggers.map((t, i) => (
+        <li key={i} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+          <span className="text-black/80 dark:text-white/80">{t.description}</span>
+          <span className="whitespace-nowrap font-mono text-xs text-black/50 dark:text-white/50">
+            {t.metricName} {COMPARATOR_SYMBOL[t.comparator]} {t.threshold.toLocaleString("en-US")}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default async function StockPage({
   params,
 }: {
@@ -106,6 +143,32 @@ export default async function StockPage({
       })
     : null;
 
+  // dataAsOf is a date, not a timestamp -- createdAt breaks same-day-rerun ties in favor of the
+  // actually-most-recent run (same reasoning as scripts/position-sizing.ts's identical query).
+  const researchReportRow = await prisma.researchReport.findFirst({
+    where: { ticker: stock.ticker },
+    orderBy: [{ dataAsOf: "desc" }, { createdAt: "desc" }],
+    select: { payload: true, decision: true, conviction: true, gateStatus: true, dataAsOf: true, obsidianPath: true },
+  });
+  const researchReport = researchReportRow ? (researchReportRow.payload as unknown as StockReport) : null;
+
+  // Position Sizing Model (Phase 5) -- only meaningful for a *current* GO, same "not sizeable" rule
+  // as scripts/position-sizing.ts. PriceHistory is weekly, not daily -- see lib/position-sizing.ts's
+  // computeAnnualizedVolatility doc comment for why that changes the annualization math.
+  const positionSize = researchReportRow?.decision === "GO"
+    ? await (async () => {
+        const priceRows = await prisma.priceHistory.findMany({
+          where: { stockId: stock.id },
+          orderBy: { date: "desc" },
+          take: 52,
+          select: { close: true },
+        });
+        const closes = priceRows.map((p) => p.close).reverse();
+        const vol = computeAnnualizedVolatility(closes);
+        return suggestPositionSize(researchReportRow.conviction, vol);
+      })()
+    : null;
+
   return (
     <main className="mx-auto max-w-4xl px-6 py-10">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
@@ -141,8 +204,105 @@ export default async function StockPage({
 
       {staleDays != null && staleDays > 2 && (
         <div className="mt-4 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
-          Data as of {stock.lastFetchedAt?.toLocaleDateString()} ({staleDays} days ago)
+          Data as of {stock.lastFetchedAt?.toLocaleDateString("en-US")} ({staleDays} days ago)
         </div>
+      )}
+
+      {researchReportRow && researchReport && (
+        <section className="mt-8 rounded-lg border border-black/10 p-4 dark:border-white/15">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-black/50 dark:text-white/50">
+              Research Verdict
+            </h2>
+            <div className="flex items-center gap-2">
+              <Badge text={researchReportRow.decision} styleKey={researchReportRow.decision} styles={DECISION_STYLE} />
+              <span className="text-xs text-black/50 dark:text-white/50">conviction {researchReportRow.conviction}/5</span>
+              <Badge text={researchReportRow.gateStatus} styleKey={researchReportRow.gateStatus} styles={GATE_STATUS_STYLE} />
+            </div>
+          </div>
+
+          <p className="mt-3 text-xs text-black/40 dark:text-white/40">
+            data as of {researchReportRow.dataAsOf.toLocaleDateString("en-US")} · review by {researchReport.verdict.reviewDate}
+            {researchReportRow.obsidianPath ? ` · exported to Obsidian: ${researchReportRow.obsidianPath}` : ""}
+          </p>
+
+          <p className="mt-3 text-sm leading-relaxed text-black/80 dark:text-white/80">{researchReport.verdict.thesis}</p>
+
+          {researchReport.expectationGap && (
+            <p className="mt-3 text-sm text-black/60 dark:text-white/60">
+              <span className="font-medium">Expectation gap (reverse DCF):</span>{" "}
+              {researchReport.expectationGap.classification.replace(/-/g, " ")} — implied{" "}
+              {(researchReport.expectationGap.impliedGrowthRate * 100).toFixed(1)}% vs. achievable{" "}
+              {(researchReport.expectationGap.achievableGrowthRate * 100).toFixed(1)}% growth
+            </p>
+          )}
+
+          {positionSize && (
+            <p className="mt-3 text-sm text-black/60 dark:text-white/60">
+              <span className="font-medium">Suggested position size:</span> {positionSize.suggestedWeightPct.toFixed(1)}% of capital
+              <span className="text-xs text-black/40 dark:text-white/40"> (inverse-volatility sizing, {(positionSize.annualizedVol * 100).toFixed(1)}% annualized vol — a starting point, not an allocator)</span>
+            </p>
+          )}
+
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-black/50 dark:text-white/50">Bulls</h3>
+              <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-black/80 dark:text-white/80">
+                {(researchReport.bulls ?? []).map((b, i) => (
+                  <li key={i}>{b.claim}</li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-black/50 dark:text-white/50">Bears</h3>
+              <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-black/80 dark:text-white/80">
+                {(researchReport.bears ?? []).map((b, i) => (
+                  <li key={i}>{b.claim}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          {(researchReport.moat ?? []).length > 0 && (
+            <div className="mt-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-black/50 dark:text-white/50">Moat</h3>
+              <ul className="mt-2 space-y-1 text-sm text-black/80 dark:text-white/80">
+                {researchReport.moat.map((m, i) => (
+                  <li key={i}>
+                    <span className="font-medium">{m.title}</span>{" "}
+                    <span className="text-xs text-black/50 dark:text-white/50">({m.strength})</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="mt-4">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-black/50 dark:text-white/50">
+              Invalidation triggers
+            </h3>
+            <TriggerTable triggers={researchReport.verdict.invalidationTriggers ?? []} />
+          </div>
+
+          {(() => {
+            // confirmationTriggers is a schema field added after some already-persisted
+            // ResearchReport.payload rows were written -- TypeScript's StockReport type promises
+            // it's always an array, but that's only true for reports generated after this field
+            // existed. A real older row (GOOGL, from earlier this session) crashed the page on
+            // .length before this fallback was added -- payload is untyped Json in the DB, so the
+            // type system can't catch a pre-existing row missing a field added later.
+            const confirmationTriggers = researchReport.verdict.confirmationTriggers ?? [];
+            if (researchReport.verdict.decision !== "WAIT" || confirmationTriggers.length === 0) return null;
+            return (
+              <div className="mt-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-black/50 dark:text-white/50">
+                  Confirmation triggers (WAIT → GO)
+                </h3>
+                <TriggerTable triggers={confirmationTriggers} />
+              </div>
+            );
+          })()}
+        </section>
       )}
 
       {stock.latestOverallScore != null && (
@@ -154,7 +314,7 @@ export default async function StockPage({
               </h2>
               <div className="mt-1 text-3xl font-bold tabular-nums">{stock.latestOverallScore.toFixed(0)}<span className="text-base font-normal text-black/40 dark:text-white/40">/100</span></div>
               <p className="mt-1 text-xs text-black/40 dark:text-white/40">
-                Ranked against other {stock.market} stocks in the universe · as of {stock.latestScoreDate?.toLocaleDateString()}
+                Ranked against other {stock.market} stocks in the universe · as of {stock.latestScoreDate?.toLocaleDateString("en-US")}
               </p>
               <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
                 <dt className="text-black/50 dark:text-white/50"><DimensionLabel label="Value" detail={dims?.value} /></dt>

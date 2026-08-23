@@ -50,7 +50,7 @@ export function DeepReportPanel({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-black/50 dark:text-white/50">
           {report
-            ? `Generated ${new Date(report.createdAt).toLocaleString()} by ${report.model}`
+            ? `Generated ${new Date(report.createdAt).toLocaleString("en-US")} by ${report.model}`
             : "Calls the Anthropic API on your own key — not run automatically."}
         </p>
         <button
