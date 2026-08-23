@@ -12,9 +12,9 @@ import path from "path";
 import { z } from "zod";
 import type { PrismaClient, Prisma } from "../../generated/prisma/client";
 import { validateSection, sectionSchemas, type SectionName } from "../report/schema";
-import { checkGrounding, checkBulletGrounding, checkMoatGrounding, checkClaimGrounding, checkInvalidationTriggers, type RealFact } from "./grounding";
+import { checkGrounding, checkBulletGrounding, checkMoatGrounding, checkFactorSensitivityGrounding, checkClaimGrounding, checkInvalidationTriggers, type RealFact } from "./grounding";
 import { RateLimitError, FatalProviderError } from "./providers/errors";
-import type { Fundamentals, BulletItem, MoatItem, ClaimItem, Synthesis } from "../report/types";
+import type { Fundamentals, BulletItem, MoatItem, FactorExposure, ClaimItem, Synthesis } from "../report/types";
 import * as anthropicProvider from "./providers/anthropic";
 import * as geminiProvider from "./providers/gemini";
 import * as groqProvider from "./providers/groq";
@@ -158,6 +158,8 @@ function groundingIssuesForSection(section: SectionName, data: unknown, realFact
       return checkBulletGrounding(data as BulletItem[], realFacts).issues.map((i) => `"${i.title}": ${i.reason} — ${i.detail}`);
     case "moat":
       return checkMoatGrounding(data as MoatItem[], realFacts).issues.map((i) => `"${i.title}": ${i.reason} — ${i.detail}`);
+    case "factorSensitivity":
+      return checkFactorSensitivityGrounding(data as FactorExposure[], realFacts).issues.map((i) => `"${i.title}": ${i.reason} — ${i.detail}`);
     case "businessSummary":
     case "bulls":
     case "bears":

@@ -87,6 +87,25 @@ export interface MoatItem {
   supportingFactIds: string[];       // บังคับอย่างน้อย 1 — factId จริงจาก FinancialFact ที่ใช้เป็นหลักฐาน (ตรงๆ หรือโดยอ้อมก็ได้ ดู moat.md)
 }
 
+// ---------- 5b. Factor Sensitivity (Phase 2 roadmap item) — same shape/grounding discipline as
+// MoatItem (qualitative judgment, not a provable fact, but every number cited is still checked),
+// just with a direction on top of magnitude. No factId equivalent exists for "is this factor
+// actually relevant" the way it does for a cited number — that judgment call is inherent to this
+// section, flagged in the agent's own output rather than hidden. ----------
+
+export type MacroFactor =
+  | 'interest_rates' | 'usd_strength' | 'oil_price'
+  | 'china_demand'   | 'consumer_spending' | 'commodity_input_costs';
+
+export interface FactorExposure {
+  factor: MacroFactor;
+  direction: 'positive' | 'negative';  // stock benefits (positive) or is hurt (negative) when the factor RISES
+  weight: 'high' | 'medium' | 'low';
+  title: string;
+  body: string;
+  supportingFactIds: string[];         // บังคับอย่างน้อย 1 — เหมือน MoatItem, ตรงหรือโดยอ้อมก็ได้
+}
+
 // ---------- 6/7. Charts ----------
 
 export interface ChartSeries {
@@ -197,6 +216,7 @@ export interface StockReport {
   fundamentals: Fundamentals;         // บังคับ
   recentDevelopments: BulletItem[];
   moat: MoatItem[];
+  factorSensitivity: FactorExposure[];
   charts: ChartBlock[];
   growthDrivers: BulletItem[];
   riskFactors: BulletItem[];          // บังคับ >=1

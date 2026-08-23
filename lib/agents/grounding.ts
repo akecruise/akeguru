@@ -20,7 +20,7 @@
  * supportingFactIds stands in for it). See the shared checkTextGrounding() below for the two
  * checks all three run.
  */
-import type { Fundamentals, Metric, BulletItem, MoatItem, ClaimItem, InvalidationTrigger, StockReport } from "../report/types";
+import type { Fundamentals, Metric, BulletItem, MoatItem, FactorExposure, ClaimItem, InvalidationTrigger, StockReport } from "../report/types";
 
 export interface RealFact {
   id: string;
@@ -349,6 +349,16 @@ export function checkMoatGrounding(moatItems: MoatItem[], realFacts: RealFact[])
   );
 }
 
+/** Same shape/reasoning as checkMoatGrounding — FactorExposure.body is exactly as qualitative
+ *  (which factors matter, and why) as MoatItem.body is, so it gets the same treatment: no
+ *  requirement that a number appear, but any number that IS stated has to match a cited fact. */
+export function checkFactorSensitivityGrounding(exposures: FactorExposure[], realFacts: RealFact[]): BulletGroundingResult {
+  return checkTextGrounding(
+    exposures.map((f) => ({ title: f.title, text: f.body, supportingFactIds: f.supportingFactIds })),
+    realFacts,
+  );
+}
+
 /**
  * Exhaustive over every ClaimItem (bulls/bears from the synthesis agent). ClaimItem has no
  * separate title, just `claim` — used as both title and text here. The zod-level
@@ -407,12 +417,13 @@ export function collectReportFactIds(report: StockReport): string[] {
   for (const m of allMetrics(report.fundamentals)) if (m.factId) ids.add(m.factId);
   for (const b of [...report.riskFactors, ...report.growthDrivers]) for (const id of b.supportingFactIds) ids.add(id);
   for (const m of report.moat) for (const id of m.supportingFactIds) ids.add(id);
+  for (const f of report.factorSensitivity) for (const id of f.supportingFactIds) ids.add(id);
   for (const c of [...report.businessSummary, ...report.bulls, ...report.bears]) for (const id of c.supportingFactIds) ids.add(id);
   return [...ids];
 }
 
 export interface StockReportGroundingIssue {
-  section: "fundamentals" | "riskFactors" | "growthDrivers" | "moat" | "businessSummary" | "bulls" | "bears" | "invalidationTriggers";
+  section: "fundamentals" | "riskFactors" | "growthDrivers" | "moat" | "factorSensitivity" | "businessSummary" | "bulls" | "bears" | "invalidationTriggers";
   reason: string;
   title: string;
   detail: string;
@@ -444,6 +455,7 @@ export function checkStockReportGrounding(report: StockReport, realFacts: RealFa
   const riskResult = checkBulletGrounding(report.riskFactors, realFacts);
   const growthResult = checkBulletGrounding(report.growthDrivers, realFacts);
   const moatResult = checkMoatGrounding(report.moat, realFacts);
+  const factorSensitivityResult = checkFactorSensitivityGrounding(report.factorSensitivity, realFacts);
   const businessResult = checkClaimGrounding(report.businessSummary, realFacts);
   const bullsResult = checkClaimGrounding(report.bulls, realFacts);
   const bearsResult = checkClaimGrounding(report.bears, realFacts);
@@ -454,6 +466,7 @@ export function checkStockReportGrounding(report: StockReport, realFacts: RealFa
     ...riskResult.issues.map((i) => ({ section: "riskFactors" as const, reason: i.reason, title: i.title, detail: i.detail })),
     ...growthResult.issues.map((i) => ({ section: "growthDrivers" as const, reason: i.reason, title: i.title, detail: i.detail })),
     ...moatResult.issues.map((i) => ({ section: "moat" as const, reason: i.reason, title: i.title, detail: i.detail })),
+    ...factorSensitivityResult.issues.map((i) => ({ section: "factorSensitivity" as const, reason: i.reason, title: i.title, detail: i.detail })),
     ...businessResult.issues.map((i) => ({ section: "businessSummary" as const, reason: i.reason, title: i.title, detail: i.detail })),
     ...bullsResult.issues.map((i) => ({ section: "bulls" as const, reason: i.reason, title: i.title, detail: i.detail })),
     ...bearsResult.issues.map((i) => ({ section: "bears" as const, reason: i.reason, title: i.title, detail: i.detail })),
@@ -465,6 +478,7 @@ export function checkStockReportGrounding(report: StockReport, realFacts: RealFa
     riskResult.checkedCount +
     growthResult.checkedCount +
     moatResult.checkedCount +
+    factorSensitivityResult.checkedCount +
     businessResult.checkedCount +
     bullsResult.checkedCount +
     bearsResult.checkedCount +

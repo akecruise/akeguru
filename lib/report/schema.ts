@@ -82,6 +82,21 @@ export const MoatItemSchema = z.object({
   supportingFactIds: z.array(z.string()).min(1),  // บังคับอ้าง fact จริงอย่างน้อย 1 ตัว — ใช้กับ checkMoatGrounding()
 });
 
+// ---------- 5b ----------
+export const MacroFactorSchema = z.enum([
+  'interest_rates', 'usd_strength', 'oil_price',
+  'china_demand', 'consumer_spending', 'commodity_input_costs',
+]);
+
+export const FactorExposureSchema = z.object({
+  factor: MacroFactorSchema,
+  direction: z.enum(['positive', 'negative']),
+  weight: z.enum(['high', 'medium', 'low']),
+  title: z.string().min(1),
+  body: z.string().min(10),
+  supportingFactIds: z.array(z.string()).min(1),  // บังคับอ้าง fact จริงอย่างน้อย 1 ตัว — ใช้กับ checkFactorSensitivityGrounding()
+});
+
 // ---------- 6/7 ----------
 export const ChartBlockSchema = z.object({
   id: z.enum(['revenue_opinc', 'valuation_multiples', 'eps_fcf']),
@@ -215,6 +230,7 @@ export const StockReportSchema = z.object({
   fundamentals: FundamentalsSchema,
   recentDevelopments: z.array(BulletItemSchema).default([]),
   moat: z.array(MoatItemSchema).default([]),
+  factorSensitivity: z.array(FactorExposureSchema).default([]),
   charts: z.array(ChartBlockSchema).default([]),
   growthDrivers: z.array(BulletItemSchema).default([]),
   riskFactors: z.array(BulletItemSchema).min(1),
@@ -232,6 +248,7 @@ export const sectionSchemas = {
   fundamentals:       FundamentalsSchema,
   recentDevelopments: z.array(BulletItemSchema),
   moat:               z.array(MoatItemSchema),
+  factorSensitivity:  z.array(FactorExposureSchema),
   charts:             z.array(ChartBlockSchema),
   growthDrivers:      z.array(BulletItemSchema),
   riskFactors:        z.array(BulletItemSchema).min(1),

@@ -10,8 +10,8 @@
  * MSFT's real ~3.5T). This is kept verbatim as evidence the DB-existence check actually catches
  * wholesale hallucination, not just a hypothetical.
  */
-import { checkGrounding, checkBulletGrounding, checkMoatGrounding, checkClaimGrounding, checkInvalidationTriggers, checkStockReportGrounding, collectReportFactIds, type RealFact } from "../lib/agents/grounding";
-import type { Fundamentals, BulletItem, MoatItem, ClaimItem, InvalidationTrigger, StockReport } from "../lib/report/types";
+import { checkGrounding, checkBulletGrounding, checkMoatGrounding, checkFactorSensitivityGrounding, checkClaimGrounding, checkInvalidationTriggers, checkStockReportGrounding, collectReportFactIds, type RealFact } from "../lib/agents/grounding";
+import type { Fundamentals, BulletItem, MoatItem, FactorExposure, ClaimItem, InvalidationTrigger, StockReport } from "../lib/report/types";
 
 function check(label: string, actual: boolean, expected: boolean) {
   const pass = actual === expected;
@@ -627,6 +627,7 @@ const MINIMAL_REPORT_WITH_ONE_BAD_RISK: StockReport = {
     reviewDate: "2027-01-01",
   },
   expectationGap: null,
+  factorSensitivity: [],
 };
 
 {
@@ -782,6 +783,41 @@ const FCF_FACT: RealFact[] = [{ id: "cmt-fcf-real", metricName: "FCF", value: 16
   const caughtAsUnknownMetric = fakeResult.issues.length === 1 && fakeResult.issues[0].reason === "unknown-metric";
   console.log(`   caught via unknown-metric specifically: ${caughtAsUnknownMetric ? "yes ✓" : "no ✗ (" + JSON.stringify(fakeResult.issues) + ")"}`);
   if (!caughtAsUnknownMetric) process.exitCode = 1;
+}
+
+// ---------- Case 28: checkFactorSensitivityGrounding (Phase 2 — Factor Sensitivity Agent) ----------
+// Same shape/checks as checkMoatGrounding (factId exists, cited numbers are close) — FactorExposure
+// is structurally identical to MoatItem apart from `factor`/`direction` instead of `type`/`strength`.
+
+const DEBT_FACTS: RealFact[] = [{ id: "cmt-de-real", metricName: "Debt/Equity", value: 0.85, unit: "x" }];
+
+{
+  const wellGrounded: FactorExposure = {
+    factor: "interest_rates",
+    direction: "negative",
+    weight: "medium",
+    title: "Elevated leverage sensitive to rate moves",
+    body: "Debt/Equity of 0.85x means rising rates increase refinancing cost.",
+    supportingFactIds: ["cmt-de-real"],
+  };
+  const result = checkFactorSensitivityGrounding([wellGrounded], DEBT_FACTS);
+  check("28. well-grounded factor exposure -> passes", result.ok, true);
+
+  // A fake factId also cascades into "unsupported-number" (no valid cited fact left to check 0.85
+  // against) — same cascade documented live in lib/gates/gate2-consistency.ts's original debugging.
+  const fakeFactId: FactorExposure = { ...wellGrounded, supportingFactIds: ["cmt-does-not-exist"] };
+  const fakeResult = checkFactorSensitivityGrounding([fakeFactId], DEBT_FACTS);
+  check("28b. fake supportingFactIds on a factor exposure -> caught", fakeResult.ok, false);
+  const caughtAsUnknownFactId = fakeResult.issues.some((i) => i.reason === "unknown-factId");
+  console.log(`   caught via unknown-factId (among ${fakeResult.issues.length} issue(s)): ${caughtAsUnknownFactId ? "yes ✓" : "no ✗ (" + JSON.stringify(fakeResult.issues) + ")"}`);
+  if (!caughtAsUnknownFactId) process.exitCode = 1;
+
+  const fabricatedNumber: FactorExposure = { ...wellGrounded, body: "Debt/Equity of 1.50x (fabricated) means rising rates increase refinancing cost." };
+  const numberResult = checkFactorSensitivityGrounding([fabricatedNumber], DEBT_FACTS);
+  check("28c. fabricated number in body -> caught", numberResult.ok, false);
+  const caughtAsUnsupportedNumber = numberResult.issues.length === 1 && numberResult.issues[0].reason === "unsupported-number";
+  console.log(`   caught via unsupported-number specifically: ${caughtAsUnsupportedNumber ? "yes ✓" : "no ✗ (" + JSON.stringify(numberResult.issues) + ")"}`);
+  if (!caughtAsUnsupportedNumber) process.exitCode = 1;
 }
 
 console.log("\ndone.");

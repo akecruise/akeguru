@@ -23,7 +23,7 @@ import { buildConsensusEstimates } from "./estimates";
 import { validateReport, type SectionName } from "./schema";
 import { detectExchange } from "../data/input-sources/router";
 import { computeExpectationGap, computeNormalizedFcf, computeRevenueCagr } from "../data/expectation-gap";
-import type { StockReport, Fundamentals, BulletItem, MoatItem, ClaimItem, Synthesis, ModelTier } from "./types";
+import type { StockReport, Fundamentals, BulletItem, MoatItem, FactorExposure, ClaimItem, Synthesis, ModelTier } from "./types";
 
 /**
  * runAgent only returns {ok:false} on a zod-validation failure — a raw provider exception (network
@@ -67,6 +67,7 @@ const AGENT_PATHS = {
   valuation: path.join(AGENTS_DIR, "valuation.md"),
   risk: path.join(AGENTS_DIR, "risk.md"),
   moat: path.join(AGENTS_DIR, "moat.md"),
+  factorSensitivity: path.join(AGENTS_DIR, "factor-sensitivity.md"),
   business: path.join(AGENTS_DIR, "business.md"),
   growth: path.join(AGENTS_DIR, "growth.md"),
   synthesis: path.join(AGENTS_DIR, "synthesis.md"),
@@ -120,6 +121,8 @@ export async function runFullReport(
   record("risk", riskResult);
   const moatResult = await safeRunAgent(prisma, ticker, AGENT_PATHS.moat, "moat", providerOverride);
   record("moat", moatResult);
+  const factorSensitivityResult = await safeRunAgent(prisma, ticker, AGENT_PATHS.factorSensitivity, "factorSensitivity", providerOverride);
+  record("factorSensitivity", factorSensitivityResult);
 
   const companyProfileContext = await buildCompanyProfileContext(prisma, ticker);
   const businessResult = await safeRunAgent(prisma, ticker, AGENT_PATHS.business, "businessSummary", providerOverride, companyProfileContext);
@@ -181,7 +184,9 @@ export async function runFullReport(
     `\n\n[expectationGap] (reverse DCF -- pre-computed, ไม่ใช่ agent output, ไม่ต้องมี factId แต่ควรเอาไปใช้ประกอบ thesis/killCriteria/invalidationTriggers ถ้ามีนัยสำคัญ)\n` +
     (expectationGap
       ? JSON.stringify(expectationGap)
-      : "null (ข้อมูลไม่พอคำนวณ เช่น FCF ติดลบ หรือไม่มี estimate การเติบโต -- ไม่ต้องพูดถึงในรายงาน)");
+      : "null (ข้อมูลไม่พอคำนวณ เช่น FCF ติดลบ หรือไม่มี estimate การเติบโต -- ไม่ต้องพูดถึงในรายงาน)") +
+    `\n\n[factorSensitivity] (macro exposure ที่ agent ก่อนหน้าระบุไว้แล้ว -- เอาไปใช้ประกอบ bulls/bears/thesis ถ้ามีนัยสำคัญ)\n` +
+    JSON.stringify(factorSensitivityResult.ok ? factorSensitivityResult.content : []);
   const synthesisResult = await safeRunAgent(prisma, ticker, AGENT_PATHS.synthesis, "synthesis", providerOverride, synthesisContext);
   record("synthesis", synthesisResult);
 
@@ -222,6 +227,7 @@ export async function runFullReport(
     fundamentals: valuationResult.content as Fundamentals,
     recentDevelopments: [], // not built yet
     moat: moatResult.ok ? (moatResult.content as MoatItem[]) : [],
+    factorSensitivity: factorSensitivityResult.ok ? (factorSensitivityResult.content as FactorExposure[]) : [],
     charts: [], // not built yet
     growthDrivers: growthResult.ok ? (growthResult.content as BulletItem[]) : [],
     riskFactors: riskResult.content as BulletItem[],

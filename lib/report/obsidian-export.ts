@@ -13,7 +13,7 @@
  */
 import fs from "fs/promises";
 import path from "path";
-import type { StockReport, MetricGroup, ClaimItem, BulletItem, MoatItem, EstimateBlock, Exchange, InvalidationTrigger, ExpectationGapResult } from "./types";
+import type { StockReport, MetricGroup, ClaimItem, BulletItem, MoatItem, FactorExposure, EstimateBlock, Exchange, InvalidationTrigger, ExpectationGapResult } from "./types";
 import { EXPLICIT_STAGE_YEARS } from "../data/expectation-gap";
 
 const MARKET_FOLDER: Record<Exchange, string> = {
@@ -61,6 +61,15 @@ function renderBullets(items: BulletItem[]): string {
 function renderMoat(items: MoatItem[]): string {
   if (!items.length) return "_none_";
   return items.map((m) => `### ${m.title} (\`${m.type}\`, strength: ${m.strength})\n\n${m.body}`).join("\n\n");
+}
+
+const DIRECTION_ARROW: Record<FactorExposure["direction"], string> = { positive: "↑ benefits", negative: "↓ hurt" };
+
+function renderFactorSensitivity(items: FactorExposure[]): string {
+  if (!items.length) return "_no significant macro exposure identified_";
+  return items
+    .map((f) => `### ${f.title} (\`${f.factor}\`, ${DIRECTION_ARROW[f.direction]} when it rises, weight: ${f.weight})\n\n${f.body}`)
+    .join("\n\n");
 }
 
 /** [[Theme - X]] wikilinks so a stock's note shows up in Obsidian's graph/backlinks under each
@@ -174,6 +183,7 @@ export function renderStockReportMarkdown(report: StockReport): string {
     `## Business Summary\n\n${renderClaims(report.businessSummary)}`,
     `## Fundamentals\n\n${fundamentalsSection}`,
     `## Moat\n\n${renderMoat(report.moat)}`,
+    `## Factor Sensitivity\n\n${renderFactorSensitivity(report.factorSensitivity)}`,
     `## Risk Factors\n\n${renderBullets(report.riskFactors)}`,
     `## Growth Drivers\n\n${renderBullets(report.growthDrivers)}`,
     `## Consensus Estimates\n\n${renderEstimates(report.estimates)}`,

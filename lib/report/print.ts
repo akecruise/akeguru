@@ -3,7 +3,7 @@
  * dumping the raw JSON, so `npx tsx scripts/run-report.ts <ticker>` is actually readable at a
  * glance rather than requiring a JSON viewer.
  */
-import type { StockReport, MetricGroup, ClaimItem, BulletItem, MoatItem } from "./types";
+import type { StockReport, MetricGroup, ClaimItem, BulletItem, MoatItem, FactorExposure } from "./types";
 
 const RULE = "=".repeat(80);
 const SUBRULE = "-".repeat(80);
@@ -56,6 +56,17 @@ function printMoat(items: MoatItem[]): string {
   items.forEach((m, i) => {
     lines.push(`  ${i + 1}. [${m.type} / ${m.strength}] ${m.title}`);
     lines.push(`     ${m.body}`);
+  });
+  return lines.join("\n");
+}
+
+function printFactorSensitivity(items: FactorExposure[]): string {
+  if (!items.length) return "";
+  const lines = ["FACTOR SENSITIVITY"];
+  items.forEach((f, i) => {
+    const arrow = f.direction === "positive" ? "benefits" : "hurt";
+    lines.push(`  ${i + 1}. [${f.factor} / ${f.weight}] ${f.title}  (${arrow} when it rises)`);
+    lines.push(`     ${f.body}`);
   });
   return lines.join("\n");
 }
@@ -125,6 +136,13 @@ export function printReport(report: StockReport): string {
   if (moat) {
     out.push(SUBRULE);
     out.push(moat);
+    out.push("");
+  }
+
+  const factorSensitivity = printFactorSensitivity(report.factorSensitivity);
+  if (factorSensitivity) {
+    out.push(SUBRULE);
+    out.push(factorSensitivity);
     out.push("");
   }
 

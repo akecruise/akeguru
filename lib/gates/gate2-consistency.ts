@@ -11,7 +11,7 @@
  * that doesn't exist" principle as everything else here, just checking a metric name instead of a
  * factId (a trigger watches a metric going forward, not a specific historical fact row).
  */
-import { checkBulletGrounding, checkMoatGrounding, checkClaimGrounding, checkInvalidationTriggers, type RealFact } from "../agents/grounding";
+import { checkBulletGrounding, checkMoatGrounding, checkFactorSensitivityGrounding, checkClaimGrounding, checkInvalidationTriggers, type RealFact } from "../agents/grounding";
 import type { StockReport } from "../report/types";
 import type { GateOutcome } from "./types";
 
@@ -22,6 +22,7 @@ export function gate2Consistency(report: StockReport, realFacts: RealFact[]): Ga
     riskFactors: checkBulletGrounding(report.riskFactors, realFacts),
     growthDrivers: checkBulletGrounding(report.growthDrivers, realFacts),
     moat: checkMoatGrounding(report.moat, realFacts),
+    factorSensitivity: checkFactorSensitivityGrounding(report.factorSensitivity, realFacts),
     businessSummary: checkClaimGrounding(report.businessSummary, realFacts),
     bulls: checkClaimGrounding(report.bulls, realFacts),
     bears: checkClaimGrounding(report.bears, realFacts),
