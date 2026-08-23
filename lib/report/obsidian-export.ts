@@ -13,7 +13,8 @@
  */
 import fs from "fs/promises";
 import path from "path";
-import type { StockReport, MetricGroup, ClaimItem, BulletItem, MoatItem, EstimateBlock, Exchange, InvalidationTrigger } from "./types";
+import type { StockReport, MetricGroup, ClaimItem, BulletItem, MoatItem, EstimateBlock, Exchange, InvalidationTrigger, ExpectationGapResult } from "./types";
+import { EXPLICIT_STAGE_YEARS } from "../data/expectation-gap";
 
 const MARKET_FOLDER: Record<Exchange, string> = {
   SEC: "USA",
@@ -82,6 +83,28 @@ function renderInvalidationTriggers(triggers: InvalidationTrigger[]): string {
   return ["| Trigger | Metric | Condition |", "|---|---|---|", ...rows].join("\n");
 }
 
+const CLASSIFICATION_LABEL: Record<ExpectationGapResult["classification"], string> = {
+  "priced-for-perfection": "⚠️ Priced for Perfection — market implies more growth than looks achievable",
+  reasonable: "✅ Reasonable — implied growth roughly matches what looks achievable",
+  "undervalued-expectations": "📉 Undervalued Expectations — market implies less growth than looks achievable",
+  unreliable: "❓ Unreliable — implied growth hit the search bound, not a meaningful read",
+};
+
+function renderExpectationGap(gap: ExpectationGapResult | null): string {
+  if (!gap) return "_not computed (insufficient data — e.g. negative FCF, or no growth estimate available)_";
+  const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+  return [
+    `**${CLASSIFICATION_LABEL[gap.classification]}**`,
+    "",
+    `| | |`,
+    `|---|---|`,
+    `| Required return (CAPM) | ${pct(gap.requiredReturn)} |`,
+    `| Market-implied growth (${EXPLICIT_STAGE_YEARS}yr) | ${pct(gap.impliedGrowthRate)} |`,
+    `| Achievable growth (analyst/historical blend) | ${pct(gap.achievableGrowthRate)} |`,
+    `| Gap | ${gap.gapPct >= 0 ? "+" : ""}${gap.gapPct.toFixed(1)}pp |`,
+  ].join("\n");
+}
+
 function renderEstimates(blocks: EstimateBlock[]): string {
   if (!blocks.length) return "_no consensus estimates available_";
   return blocks
@@ -143,6 +166,7 @@ export function renderStockReportMarkdown(report: StockReport): string {
     `**Decision: ${verdict.decision}** (conviction ${verdict.conviction}/5) — review by ${verdict.reviewDate}`,
     ...(meta.themes.length ? [`**Themes:** ${renderThemeLinks(meta.themes)}`] : []),
     `## Thesis\n\n${verdict.thesis}`,
+    `## Expectation Gap (reverse DCF)\n\n${renderExpectationGap(report.expectationGap)}`,
     `## Kill Criteria\n\n${verdict.killCriteria.map((k) => `- ${k}`).join("\n")}`,
     `## Invalidation Triggers\n\n${renderInvalidationTriggers(verdict.invalidationTriggers)}`,
     `## Bulls\n\n${renderClaims(report.bulls)}`,

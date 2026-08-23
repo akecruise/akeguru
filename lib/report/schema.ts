@@ -196,6 +196,17 @@ export const SynthesisSchema = z.object({
   verdict: VerdictSchema,
 });
 
+// ---------- 14 ----------
+// Phase 2 "Expectation Gap Model" — computed by lib/data/expectation-gap.ts in the orchestrator
+// (pure math, not agent output), so this only needs shape validation, no grounding check.
+export const ExpectationGapSchema = z.object({
+  requiredReturn: z.number(),
+  impliedGrowthRate: z.number(),
+  achievableGrowthRate: z.number(),
+  gapPct: z.number(),
+  classification: z.enum(['priced-for-perfection', 'reasonable', 'undervalued-expectations', 'unreliable']),
+});
+
 // ---------- root ----------
 export const StockReportSchema = z.object({
   meta: ReportMetaSchema,
@@ -212,6 +223,7 @@ export const StockReportSchema = z.object({
   bulls: z.array(ClaimItemSchema).min(2),
   bears: z.array(ClaimItemSchema).min(2),
   verdict: VerdictSchema,
+  expectationGap: ExpectationGapSchema.nullable(),
 });
 
 /** schema แยกรายsection — ใช้ตรวจ output ของ agent แต่ละตัว */

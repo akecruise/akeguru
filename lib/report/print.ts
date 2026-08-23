@@ -74,6 +74,17 @@ export function printReport(report: StockReport): string {
   out.push("");
   out.push(verdict.thesis);
   out.push("");
+
+  const gap = report.expectationGap;
+  out.push("Expectation gap (reverse DCF):");
+  if (gap) {
+    const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+    out.push(`  ${gap.classification}  —  implied ${pct(gap.impliedGrowthRate)} vs. achievable ${pct(gap.achievableGrowthRate)}  (gap ${gap.gapPct >= 0 ? "+" : ""}${gap.gapPct.toFixed(1)}pp, required return ${pct(gap.requiredReturn)})`);
+  } else {
+    out.push("  not computed (insufficient data)");
+  }
+  out.push("");
+
   out.push("Kill criteria:");
   for (const k of verdict.killCriteria) out.push(`  - ${k}`);
   out.push("");

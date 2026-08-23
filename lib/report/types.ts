@@ -3,6 +3,8 @@
  * ทุก agent เขียนลง object นี้ แล้ว renderer อ่านไปทำ HTML
  */
 
+import type { ExpectationGapResult } from '../data/expectation-gap';
+
 export type Exchange = 'SEC' | 'HKEX' | 'SET';
 export type ModelTier = 'TIER1_FABLE5' | 'TIER2_OPUS' | 'TIER3_SONNET' | 'NONE';
 export type Unit = 'x' | '%' | 'currency' | 'count' | 'raw';
@@ -203,7 +205,12 @@ export interface StockReport {
   bulls: ClaimItem[];                 // บังคับ >=2
   bears: ClaimItem[];                 // บังคับ >=2
   verdict: Verdict;                   // บังคับ
+  expectationGap: ExpectationGapResult | null; // Phase 2 "Expectation Gap Model" — reverse DCF, computed by lib/data/expectation-gap.ts in the orchestrator (pure math, not agent output — no grounding check needed). Null when there isn't enough data to compute it (e.g. negative FCF, no achievable-growth reference).
 }
+
+// Re-exported so callers of this file don't also need to import from lib/data/expectation-gap.ts
+// just to reference the result shape.
+export type { ExpectationGapResult } from '../data/expectation-gap';
 
 /** section ที่ Gate 5 (Completeness) บังคับต้องมี */
 export const REQUIRED_SECTIONS = [

@@ -22,6 +22,7 @@ import { buildCompanyProfileContext, buildSynthesisContext } from "../agents/con
 import { buildConsensusEstimates } from "./estimates";
 import { validateReport, type SectionName } from "./schema";
 import { detectExchange } from "../data/input-sources/router";
+import { computeExpectationGap, computeNormalizedFcf, computeRevenueCagr } from "../data/expectation-gap";
 import type { StockReport, Fundamentals, BulletItem, MoatItem, ClaimItem, Synthesis, ModelTier } from "./types";
 
 /**
@@ -139,7 +140,48 @@ export async function runFullReport(
     };
   }
 
-  const synthesisContext = buildSynthesisContext(valuationResult.content, riskResult.content, moatResult.ok ? moatResult.content : [], todayIso);
+  // Pure math (see lib/data/expectation-gap.ts), computed before synthesis so its result can be
+  // handed to that agent as context — the reverse-DCF read ("is this priced for more growth than
+  // looks achievable") is exactly the kind of thing that should inform bulls/bears/thesis/
+  // invalidationTriggers, not sit unused alongside them.
+  const exchange = detectExchange(ticker);
+  const expectationGapStock = await prisma.stock.findUnique({
+    where: { ticker },
+    select: { beta: true, marketCap: true, estRevenueGrowth: true },
+  });
+  const expectationGapFacts = await prisma.financialFact.findMany({
+    where: {
+      ticker,
+      metricName: {
+        in: ["NetCashProvidedByUsedInOperatingActivities", "PaymentsToAcquirePropertyPlantAndEquipment", "Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax"],
+      },
+    },
+    select: { metricName: true, value: true, period: true },
+  });
+  const normalizedFcf = computeNormalizedFcf(expectationGapFacts);
+  const revenueCagr = computeRevenueCagr(expectationGapFacts);
+  const achievableGrowthRate =
+    expectationGapStock?.estRevenueGrowth != null && revenueCagr != null
+      ? (expectationGapStock.estRevenueGrowth + revenueCagr) / 2
+      : (expectationGapStock?.estRevenueGrowth ?? revenueCagr);
+
+  const expectationGap =
+    normalizedFcf != null && achievableGrowthRate != null && expectationGapStock?.beta != null && expectationGapStock?.marketCap != null
+      ? computeExpectationGap({
+          marketCap: expectationGapStock.marketCap,
+          beta: expectationGapStock.beta,
+          currency: (CURRENCY_BY_EXCHANGE[exchange] ?? "USD") as "USD" | "THB" | "HKD",
+          normalizedFcf,
+          achievableGrowthRate,
+        })
+      : null;
+
+  const synthesisContext =
+    buildSynthesisContext(valuationResult.content, riskResult.content, moatResult.ok ? moatResult.content : [], todayIso) +
+    `\n\n[expectationGap] (reverse DCF -- pre-computed, ไม่ใช่ agent output, ไม่ต้องมี factId แต่ควรเอาไปใช้ประกอบ thesis/killCriteria/invalidationTriggers ถ้ามีนัยสำคัญ)\n` +
+    (expectationGap
+      ? JSON.stringify(expectationGap)
+      : "null (ข้อมูลไม่พอคำนวณ เช่น FCF ติดลบ หรือไม่มี estimate การเติบโต -- ไม่ต้องพูดถึงในรายงาน)");
   const synthesisResult = await safeRunAgent(prisma, ticker, AGENT_PATHS.synthesis, "synthesis", providerOverride, synthesisContext);
   record("synthesis", synthesisResult);
 
@@ -161,7 +203,6 @@ export async function runFullReport(
   });
   const estimates = buildConsensusEstimates(consensusFacts);
 
-  const exchange = detectExchange(ticker);
   const stock = await prisma.stock.findUnique({ where: { ticker }, select: { name: true, currency: true, themes: true } });
 
   const synthesis = synthesisResult.content as Synthesis;
@@ -189,6 +230,7 @@ export async function runFullReport(
     bulls: synthesis.bulls,
     bears: synthesis.bears,
     verdict: synthesis.verdict,
+    expectationGap,
   };
 
   const validation = validateReport(report);
