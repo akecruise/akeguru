@@ -20,6 +20,7 @@ export const ReportMetaSchema = z.object({
   generatedAt: z.string(),
   dataAsOf: z.string(),
   modelTier: ModelTierSchema,
+  themes: z.array(z.string()),
 });
 
 // ---------- 2 ----------

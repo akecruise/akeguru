@@ -17,6 +17,10 @@ export interface ReportMeta {
   generatedAt: string;       // ISO
   dataAsOf: string;          // วันที่ของงบล่าสุด
   modelTier: ModelTier;
+  themes: string[];          // manually set on Stock.themes — rendered as [[Theme - X]] wikilinks in the
+                             // Obsidian export (see lib/report/obsidian-export.ts). No Theme Agent exists
+                             // yet (that's a later phase); this is just a plain field you set yourself so
+                             // the export/vault-organization side doesn't have to wait on it.
 }
 
 // ---------- 2. Price ----------

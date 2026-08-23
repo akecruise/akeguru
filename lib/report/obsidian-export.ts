@@ -62,6 +62,15 @@ function renderMoat(items: MoatItem[]): string {
   return items.map((m) => `### ${m.title} (\`${m.type}\`, strength: ${m.strength})\n\n${m.body}`).join("\n\n");
 }
 
+/** [[Theme - X]] wikilinks so a stock's note shows up in Obsidian's graph/backlinks under each
+ *  theme it belongs to. Themes are a plain manually-set field (Stock.themes) today, not agent
+ *  output — no Theme Agent exists yet (see ReportMeta.themes's comment in lib/report/types.ts) —
+ *  so this is just formatting, same as the rest of this file. Unresolved links (the Theme note
+ *  doesn't exist yet) render fine in Obsidian and can be filled in by hand or later by that agent. */
+function renderThemeLinks(themes: string[]): string {
+  return themes.map((t) => `[[Theme - ${t}]]`).join(", ");
+}
+
 function renderEstimates(blocks: EstimateBlock[]): string {
   if (!blocks.length) return "_no consensus estimates available_";
   return blocks
@@ -81,6 +90,12 @@ function renderEstimates(blocks: EstimateBlock[]): string {
 export function renderStockReportMarkdown(report: StockReport): string {
   const { meta, verdict, fundamentals } = report;
 
+  // kebab-case tag per theme (Obsidian tags can't contain spaces) alongside the fixed tags —
+  // lets a vault-wide tag search (#theme-ai-infrastructure) work even without following the
+  // [[Theme - ...]] wikilink, which is the whole point of tags vs. links.
+  const themeTags = meta.themes.map((t) => `theme-${t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}`);
+  const tags = ["investment-thesis", "compound-os", meta.ticker.toLowerCase().replace(/[^a-z0-9]/g, ""), ...themeTags];
+
   const frontmatter = [
     "---",
     `ticker: ${meta.ticker}`,
@@ -92,7 +107,8 @@ export function renderStockReportMarkdown(report: StockReport): string {
     `generated: ${meta.generatedAt}`,
     `data_as_of: ${meta.dataAsOf}`,
     `review_date: ${verdict.reviewDate}`,
-    `tags: [investment-thesis, compound-os, ${meta.ticker.toLowerCase().replace(/[^a-z0-9]/g, "")}]`,
+    `themes: [${meta.themes.map((t) => `"${t.replace(/"/g, '\\"')}"`).join(", ")}]`,
+    `tags: [${tags.join(", ")}]`,
     "---",
   ].join("\n");
 
@@ -114,6 +130,7 @@ export function renderStockReportMarkdown(report: StockReport): string {
   const blocks = [
     `# ${meta.companyName} (${meta.ticker}) — Investment Thesis`,
     `**Decision: ${verdict.decision}** (conviction ${verdict.conviction}/5) — review by ${verdict.reviewDate}`,
+    ...(meta.themes.length ? [`**Themes:** ${renderThemeLinks(meta.themes)}`] : []),
     `## Thesis\n\n${verdict.thesis}`,
     `## Kill Criteria\n\n${verdict.killCriteria.map((k) => `- ${k}`).join("\n")}`,
     `## Bulls\n\n${renderClaims(report.bulls)}`,

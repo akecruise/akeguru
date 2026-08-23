@@ -162,7 +162,7 @@ export async function runFullReport(
   const estimates = buildConsensusEstimates(consensusFacts);
 
   const exchange = detectExchange(ticker);
-  const stock = await prisma.stock.findUnique({ where: { ticker }, select: { name: true, currency: true } });
+  const stock = await prisma.stock.findUnique({ where: { ticker }, select: { name: true, currency: true, themes: true } });
 
   const synthesis = synthesisResult.content as Synthesis;
   const report: StockReport = {
@@ -174,6 +174,7 @@ export async function runFullReport(
       generatedAt: new Date().toISOString(),
       dataAsOf: todayIso,
       modelTier: valuationResult.modelTier as ModelTier,
+      themes: stock?.themes ?? [],
     },
     priceChart: null, // not built yet
     businessSummary: businessResult.content as ClaimItem[],

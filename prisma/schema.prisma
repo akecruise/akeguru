@@ -50,6 +50,7 @@ model Stock {
   industry String?
   currency String? // defaulted from `market` at ingestion time (TH -> THB, US -> USD); should never be null in practice
   description String? @db.Text
+  themes   String[] @default([]) // manually set (no Theme Agent yet) — rendered as [[Theme - X]] wikilinks in the Obsidian export
 
   // Price / size (native currency)
   price             Float?

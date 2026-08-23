@@ -589,7 +589,7 @@ const CAPEX_MSFT_FACTS: RealFact[] = [{ id: "cmt-capex-msft", metricName: "Payme
 const REPORT_FACTS: RealFact[] = [{ id: "cmt-rev-report", metricName: "Revenue", value: 1000000000, unit: "currency" }];
 
 const MINIMAL_REPORT_WITH_ONE_BAD_RISK: StockReport = {
-  meta: { ticker: "TEST", companyName: "Test Co", exchange: "SEC", currency: "USD", generatedAt: "2026-08-20T00:00:00.000Z", dataAsOf: "2026-08-20", modelTier: "TIER2_OPUS" },
+  meta: { ticker: "TEST", companyName: "Test Co", exchange: "SEC", currency: "USD", generatedAt: "2026-08-20T00:00:00.000Z", dataAsOf: "2026-08-20", modelTier: "TIER2_OPUS", themes: [] },
   priceChart: null,
   businessSummary: [{ claim: "The company generates real, disclosed revenue.", supportingFactIds: ["cmt-rev-report"] }],
   fundamentals: {
