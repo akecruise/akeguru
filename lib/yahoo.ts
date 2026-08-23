@@ -121,7 +121,13 @@ export async function fetchStockQuoteSummary(ticker: string): Promise<FetchedSto
     operatingMargin: r.financialData?.operatingMargins ?? undefined,
     netMargin: r.financialData?.profitMargins ?? undefined,
 
-    debtToEquity: r.financialData?.debtToEquity ?? undefined,
+    // Yahoo returns debtToEquity pre-scaled as if it were a percentage (e.g. 185 for a true 1.85x
+    // ratio) -- same issue already found and fixed for the Compound OS pipeline's mapping of this
+    // same Yahoo field (see lib/data/input-sources/router.ts's YAHOO_FIELD_MAP 'financialData.
+    // debtToEquity' comment), just never applied here. Confirmed live while building the Lynch
+    // screener: HON showed 185.369 and BA showed 790.875 -- absurd as an actual x-ratio, but exactly
+    // right (1.85x, 7.91x) once divided by 100 for real companies whose leverage is public record.
+    debtToEquity: r.financialData?.debtToEquity != null ? r.financialData.debtToEquity / 100 : undefined,
     currentRatio: r.financialData?.currentRatio ?? undefined,
     quickRatio: r.financialData?.quickRatio ?? undefined,
 

@@ -10,7 +10,10 @@ export const SCREENER_SORT_FIELDS = [
   "price",
   "latestOverallScore",
   "latestMomentumScore",
+  "pegRatio",
 ] as const;
+
+export const LYNCH_CATEGORIES = ["fast_grower", "stalwart", "slow_grower", "cyclical"] as const;
 export type ScreenerSortField = (typeof SCREENER_SORT_FIELDS)[number];
 
 // Shared by the /screener page (SSR, direct call) and /api/screener (HTTP callers) so the
@@ -26,6 +29,8 @@ export const screenerFiltersSchema = z.object({
   marketCapUsdMin: z.coerce.number().optional(),
   marketCapUsdMax: z.coerce.number().optional(),
   overallScoreMin: z.coerce.number().min(0).max(100).optional(),
+  lynchCategory: z.enum(LYNCH_CATEGORIES).optional(),
+  pegMax: z.coerce.number().optional(),
   // Only ever honored when `market` scopes to a single market — price isn't
   // comparable across THB/USD even after FX conversion (see review notes).
   priceMin: z.coerce.number().optional(),
@@ -64,6 +69,10 @@ export async function queryScreener(filters: ScreenerFilters) {
     ...(filters.dividendYieldMin != null && { dividendYield: { gte: filters.dividendYieldMin } }),
     ...(filters.debtToEquityMax != null && { debtToEquity: { lte: filters.debtToEquityMax } }),
     ...(filters.overallScoreMin != null && { latestOverallScore: { gte: filters.overallScoreMin } }),
+    ...(filters.lynchCategory && { lynchCategory: filters.lynchCategory }),
+    // pegRatio is null for any stock the ratio doesn't apply to (negative P/E or growth — see
+    // lib/lynch.ts) — excluded here the same way a numeric max filter naturally excludes nulls.
+    ...(filters.pegMax != null && { pegRatio: { lte: filters.pegMax, not: null } }),
     ...((filters.marketCapUsdMin != null || filters.marketCapUsdMax != null) && {
       marketCapUsd: {
         ...(filters.marketCapUsdMin != null && { gte: filters.marketCapUsdMin }),

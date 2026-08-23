@@ -1,6 +1,14 @@
 import Link from "next/link";
-import { queryScreener, parseScreenerFilters, listSectors, SCREENER_SORT_FIELDS } from "@/lib/screener";
+import { queryScreener, parseScreenerFilters, listSectors, SCREENER_SORT_FIELDS, LYNCH_CATEGORIES } from "@/lib/screener";
 import { rankStocks, rankingWeightsSchema, DEFAULT_RANKING_WEIGHTS } from "@/lib/ranking";
+import { isLynchBuyCandidate } from "@/lib/lynch";
+
+const LYNCH_CATEGORY_LABEL: Record<(typeof LYNCH_CATEGORIES)[number], string> = {
+  fast_grower: "Fast Grower",
+  stalwart: "Stalwart",
+  slow_grower: "Slow Grower",
+  cyclical: "Cyclical",
+};
 
 function fmtNum(v: number | null | undefined, opts?: Intl.NumberFormatOptions): string {
   if (v == null) return "—";
@@ -145,6 +153,21 @@ export default async function ScreenerPage({
           />
         </label>
         <label className={labelClass}>
+          Lynch category
+          <select name="lynchCategory" defaultValue={s("lynchCategory")} className={inputClass}>
+            <option value="">All</option>
+            {LYNCH_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {LYNCH_CATEGORY_LABEL[c]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={labelClass}>
+          PEG max <span className="text-black/35 dark:text-white/35">(Lynch: &lt;1 attractive)</span>
+          <input type="number" step="any" name="pegMax" defaultValue={s("pegMax")} className={inputClass} />
+        </label>
+        <label className={labelClass}>
           Price min <span className="text-black/35 dark:text-white/35">(needs a single market)</span>
           <input type="number" step="any" name="priceMin" defaultValue={s("priceMin")} className={inputClass} />
         </label>
@@ -223,6 +246,8 @@ export default async function ScreenerPage({
               <th className="py-2 pr-4 font-medium">Div Yield</th>
               <th className="py-2 pr-4 font-medium">D/E</th>
               <th className="py-2 pr-4 font-medium">Score</th>
+              <th className="py-2 pr-4 font-medium">Lynch</th>
+              <th className="py-2 pr-4 font-medium">PEG</th>
               {isRanked && <th className="py-2 pr-4 font-medium">Rank Score</th>}
             </tr>
           </thead>
@@ -245,6 +270,15 @@ export default async function ScreenerPage({
                 <td className="py-2 pr-4">{fmtPct(stock.dividendYield)}</td>
                 <td className="py-2 pr-4">{fmtNum(stock.debtToEquity, { maximumFractionDigits: 2 })}</td>
                 <td className="py-2 pr-4">{stock.latestOverallScore != null ? Math.round(stock.latestOverallScore) : "—"}</td>
+                <td className="py-2 pr-4 text-black/60 dark:text-white/60">
+                  {stock.lynchCategory ? LYNCH_CATEGORY_LABEL[stock.lynchCategory as keyof typeof LYNCH_CATEGORY_LABEL] : "—"}
+                </td>
+                <td className="py-2 pr-4">
+                  {fmtNum(stock.pegRatio, { maximumFractionDigits: 2 })}
+                  {isLynchBuyCandidate(stock.pegRatio, stock.debtToEquity) && (
+                    <span className="ml-1" title="PEG < 1 with reasonable debt (Lynch buy candidate)">⭐</span>
+                  )}
+                </td>
                 {isRanked && (
                   <td className="py-2 pr-4 font-medium">
                     {stock.rankScore != null ? stock.rankScore.toFixed(1) : "—"}

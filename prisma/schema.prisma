@@ -117,6 +117,8 @@ model Stock {
   latestDividendScore Float?
   latestMomentumScore Float? // not part of the 5-petal Snowflake radar; used by the configurable-weight screener ranking
   latestLiquidityTier String?   // 'high' | 'medium' | 'low' | 'illiquid' | null (unknown) -- see lib/scoring.ts; latestOverallScore already has this discount applied, this is just for display/filtering
+  lynchCategory       String?   // 'fast_grower' | 'stalwart' | 'slow_grower' | 'cyclical' | null (unclassified -- see lib/lynch.ts)
+  pegRatio            Float?    // Lynch PEG = P/E / (growth rate as a whole number) -- lib/lynch.ts's computePegRatio()
   latestScoreDate     DateTime?
 
   isActive      Boolean   @default(true)

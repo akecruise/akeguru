@@ -13,6 +13,7 @@ import {
   type MarketCode,
 } from "./yahoo";
 import { scoreCohort, type ScorableStock } from "./scoring";
+import { classifyLynchCategory, computePegRatio } from "./lynch";
 import { report } from "./progress";
 
 // Shared by scripts/refresh-universe.ts (CLI/local, own direct-connection Prisma client) and
@@ -252,8 +253,13 @@ async function scoreMarket(prisma: PrismaClient, market: MarketCode): Promise<vo
 
   const results = scoreCohort(scorable);
   const date = todayForScore();
+  const stockById = new Map(stocks.map((s) => [s.id, s]));
 
   for (const [stockId, result] of results) {
+    const stock = stockById.get(stockId)!;
+    const lynchCategory = classifyLynchCategory({ estEarningsGrowth: stock.estEarningsGrowth, sector: stock.sector, beta: stock.beta });
+    const pegRatio = computePegRatio(stock.peRatio, stock.estEarningsGrowth);
+
     await prisma.scoreSnapshot.upsert({
       where: { stockId_date: { stockId, date } },
       create: {
@@ -293,6 +299,8 @@ async function scoreMarket(prisma: PrismaClient, market: MarketCode): Promise<vo
         latestDividendScore: result.dividendScore,
         latestMomentumScore: result.momentumScore,
         latestLiquidityTier: result.liquidityTier,
+        lynchCategory,
+        pegRatio,
         latestScoreDate: date,
       },
     });
