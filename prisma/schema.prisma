@@ -281,6 +281,23 @@ model FinancialFact {
   unit        String // 'x' | '%' | 'currency' | 'count'
   period      String // '2025-12-31'
   statement   String? // 'BS' | 'IS' | 'CF'
+  // The exact upstream field/tag this value came from -- disambiguates two facts that share the
+  // same human metricName but a different underlying definition (e.g. Yahoo's dotted field path
+  // 'financialData.returnOnEquity', or 'us-gaap:EarningsPerShareDiluted (10-K)' for an SEC/XBRL
+  // fact). Null where the metricName already *is* the raw definition with nothing to disambiguate.
+  sourceDefinition String?
+  // true = value is expressed in current (post-any-split) share/price terms (every Yahoo-sourced
+  // per-share or share-count fact, since Yahoo always serves live/current data); false = an
+  // as-filed historical per-share/share-count figure (SEC/XBRL) not verified against a later split;
+  // null = not applicable -- the metric isn't share-count/per-share sensitive in the first place
+  // (ratios, margins, totals), so the question doesn't arise.
+  splitAdjusted Boolean?
+  // A trust/quality annotation for when this value is known to need discounting somewhat, e.g.
+  // 'low-coverage' (fewer than MIN_ANALYSTS_FOR_COVERAGE analysts behind a consensus estimate --
+  // see lib/report/estimates.ts). Free text, not an enum: the set of frictions worth flagging will
+  // grow as more get discovered live (same reasoning as BulletGroundingIssue.reason's string
+  // literal union, kept loose rather than pre-designing every case up front). Null = none known.
+  dataFriction String?
   extractedBy String // 'YAHOO_FIELD_MAP' | 'extractor-agent'
   extractedAt DateTime  @default(now())
 

@@ -14,6 +14,7 @@ import { archiveSec } from './sec';
 import { searchFilings, archiveHkexFiling, checkCoverage, isAnnualReportTitle } from './hkex';
 import { archiveThai, normalizeThai, isThai } from './th';
 import { yahooFinance } from '../../yahoo'; // shared, rate-limited client (see lib/yahoo.ts) — a second unconfigured client here would defeat its 429 protection
+import { MIN_ANALYSTS_FOR_COVERAGE } from '../../report/estimates';
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
@@ -73,7 +74,12 @@ export async function archiveYahoo(yTicker: string, rootDir = 'raw-sources') {
 /** map Yahoo -> FinancialFact (โค้ดล้วน ไม่ใช้ AI) */
 export const YAHOO_FIELD_MAP: Record<
   string,
-  { metricName: string; unit: string; pct?: boolean; divideBy100?: boolean }
+  // perShareOrCount: this field is a raw share count (or, if one's ever added, a per-share dollar
+  // figure) rather than a ratio/margin/total -- those are split-invariant (numerator and
+  // denominator both scale with a split), so only this narrow set needs the splitAdjusted flag at
+  // all. Yahoo always serves live/current data, so every fact from this map that IS one of these
+  // is unconditionally already split-adjusted -- see mapYahooFacts below.
+  { metricName: string; unit: string; pct?: boolean; divideBy100?: boolean; perShareOrCount?: boolean }
 > = {
   'summaryDetail.trailingPE':                 { metricName: 'P/E',           unit: 'x' },
   'defaultKeyStatistics.priceToBook':         { metricName: 'P/B',           unit: 'x' },
@@ -100,7 +106,7 @@ export const YAHOO_FIELD_MAP: Record<
   'financialData.operatingCashflow':          { metricName: 'CFO',           unit: 'currency' },
   'price.marketCap':                          { metricName: 'Market Cap',    unit: 'currency' },
   'defaultKeyStatistics.enterpriseValue':     { metricName: 'EV',            unit: 'currency' },
-  'defaultKeyStatistics.sharesOutstanding':   { metricName: 'Shares Out',    unit: 'count' },
+  'defaultKeyStatistics.sharesOutstanding':   { metricName: 'Shares Out',    unit: 'count', perShareOrCount: true },
   'summaryDetail.dividendYield':              { metricName: 'Dividend Yield',unit: '%', pct: true },
   'summaryDetail.payoutRatio':                { metricName: 'Payout Ratio',  unit: '%', pct: true },
 };
@@ -121,6 +127,8 @@ export function mapYahooFacts(data: any, rawSourceId: string, ticker: string) {
       value: def.pct ? v * 100 : def.divideBy100 ? v / 100 : v,
       unit: def.unit,
       period: new Date().toISOString().slice(0, 10),
+      sourceDefinition: pathKey,
+      splitAdjusted: def.perShareOrCount ? true : null,
       extractedBy: 'YAHOO_FIELD_MAP',
     });
   }
@@ -139,25 +147,35 @@ export function mapYahooEarningsTrendFacts(data: any, rawSourceId: string, ticke
   const facts: any[] = [];
   const trend = data?.earningsTrend?.trend ?? [];
 
-  const push = (metricName: string, value: unknown, unit: string, period: string) => {
+  // sourceDefinition mirrors mapYahooFacts above: the dotted path into earningsTrend.trend[] this
+  // came from. splitAdjusted: EPS is per-share (true, and -- like every Yahoo fact -- already in
+  // current-share terms); Revenue and the analyst-count fields aren't share-count-sensitive at all
+  // (null). dataFriction: flags an estimate backed by too few analysts to trust much, using the
+  // same MIN_ANALYSTS_FOR_COVERAGE threshold lib/report/estimates.ts already applies when
+  // assembling the report -- this just makes the same judgment visible on the fact itself, at
+  // ingest time, rather than only when a report happens to get built from it.
+  const push = (metricName: string, value: unknown, unit: string, period: string, sourceDefinition: string, splitAdjusted: boolean | null, numAnalysts: number | null) => {
     if (typeof value !== 'number' || Number.isNaN(value)) return;
-    facts.push({ rawSourceId, ticker, metricName, value, unit, period, extractedBy: 'YAHOO_EARNINGS_TREND' });
+    const dataFriction = numAnalysts !== null && numAnalysts < MIN_ANALYSTS_FOR_COVERAGE ? 'low-coverage' : null;
+    facts.push({ rawSourceId, ticker, metricName, value, unit, period, sourceDefinition, splitAdjusted, dataFriction, extractedBy: 'YAHOO_EARNINGS_TREND' });
   };
 
   for (const t of trend) {
     if (!t?.endDate) continue;
     const period = new Date(t.endDate).toISOString().slice(0, 10);
     if (t.revenueEstimate) {
-      push('Revenue Estimate (Avg)', t.revenueEstimate.avg, 'currency', period);
-      push('Revenue Estimate (High)', t.revenueEstimate.high, 'currency', period);
-      push('Revenue Estimate (Low)', t.revenueEstimate.low, 'currency', period);
-      push('Revenue Estimate (# Analysts)', t.revenueEstimate.numberOfAnalysts, 'count', period);
+      const n = typeof t.revenueEstimate.numberOfAnalysts === 'number' ? t.revenueEstimate.numberOfAnalysts : null;
+      push('Revenue Estimate (Avg)', t.revenueEstimate.avg, 'currency', period, 'earningsTrend.revenueEstimate.avg', null, n);
+      push('Revenue Estimate (High)', t.revenueEstimate.high, 'currency', period, 'earningsTrend.revenueEstimate.high', null, n);
+      push('Revenue Estimate (Low)', t.revenueEstimate.low, 'currency', period, 'earningsTrend.revenueEstimate.low', null, n);
+      push('Revenue Estimate (# Analysts)', t.revenueEstimate.numberOfAnalysts, 'count', period, 'earningsTrend.revenueEstimate.numberOfAnalysts', null, null);
     }
     if (t.earningsEstimate) {
-      push('EPS Estimate (Avg)', t.earningsEstimate.avg, 'currency', period);
-      push('EPS Estimate (High)', t.earningsEstimate.high, 'currency', period);
-      push('EPS Estimate (Low)', t.earningsEstimate.low, 'currency', period);
-      push('EPS Estimate (# Analysts)', t.earningsEstimate.numberOfAnalysts, 'count', period);
+      const n = typeof t.earningsEstimate.numberOfAnalysts === 'number' ? t.earningsEstimate.numberOfAnalysts : null;
+      push('EPS Estimate (Avg)', t.earningsEstimate.avg, 'currency', period, 'earningsTrend.earningsEstimate.avg', true, n);
+      push('EPS Estimate (High)', t.earningsEstimate.high, 'currency', period, 'earningsTrend.earningsEstimate.high', true, n);
+      push('EPS Estimate (Low)', t.earningsEstimate.low, 'currency', period, 'earningsTrend.earningsEstimate.low', true, n);
+      push('EPS Estimate (# Analysts)', t.earningsEstimate.numberOfAnalysts, 'count', period, 'earningsTrend.earningsEstimate.numberOfAnalysts', null, null);
     }
   }
   return facts;

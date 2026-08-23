@@ -13,6 +13,7 @@ import pg from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../generated/prisma/client";
 import { ingest, mapYahooFacts, mapYahooEarningsTrendFacts } from "../lib/data/input-sources/router";
+import { STATEMENT_BY_TAG, SPLIT_ADJUSTED_BY_TAG } from "../lib/data/input-sources/sec";
 import { computeAllDerivedMetrics } from "../lib/data/derived-metrics";
 
 // Standalone CLI script: build its own client against the DIRECT (unpooled) connection,
@@ -83,6 +84,19 @@ async function run(ticker: string, dry: boolean) {
   const officialId = ids["SEC"] ?? ids["TH_SEC"];
   if (officialId) {
     for (const f of r.facts) {
+      // f.statementType exists on th.ts's ThFinancialRow (its own field, from ก.ล.ต.'s
+      // financial_statement) but NOT on sec.ts's SecFactRow (`f.statementType` was always
+      // undefined here, silently -- both types flow through this one untyped loop, and nothing
+      // caught it) -- fall back to STATEMENT_BY_TAG, which covers the SEC/XBRL tag case instead.
+      const statement = f.statementType ?? STATEMENT_BY_TAG[f.metricName as keyof typeof STATEMENT_BY_TAG] ?? null;
+      // form (10-K/10-Q) only exists on SecFactRow -- th.ts's rows have nothing more specific than
+      // metricName itself to disambiguate (TH_SET_CODE_MAP is still empty, see th.ts), so null there.
+      const sourceDefinition = f.form ? `us-gaap:${f.metricName} (${f.form})` : null;
+      const splitAdjusted =
+        (f.metricName as string) in SPLIT_ADJUSTED_BY_TAG
+          ? SPLIT_ADJUSTED_BY_TAG[f.metricName as keyof typeof SPLIT_ADJUSTED_BY_TAG]!
+          : null;
+
       facts.push({
         rawSourceId: officialId,
         ticker: r.ticker,
@@ -90,7 +104,9 @@ async function run(ticker: string, dry: boolean) {
         value: f.value,
         unit: f.unit,
         period: f.period,
-        statement: f.statementType ?? null,
+        statement,
+        sourceDefinition,
+        splitAdjusted,
         extractedBy: `${r.exchange}_MAP`,
       });
     }

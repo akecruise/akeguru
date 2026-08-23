@@ -25,7 +25,10 @@ const METRIC_PREFIXES = {
   eps: "EPS Estimate",
 } as const;
 
-const MIN_ANALYSTS_FOR_COVERAGE = 3;
+// Exported: lib/data/input-sources/router.ts's mapYahooEarningsTrendFacts() reuses this same
+// threshold to set FinancialFact.dataFriction = 'low-coverage' at ingest time, rather than only
+// surfacing low coverage here at report-assembly time.
+export const MIN_ANALYSTS_FOR_COVERAGE = 3;
 
 function lookup(facts: ConsensusFact[], prefix: string, suffix: string, period: string): number | null {
   const f = facts.find((f) => f.metricName === `${prefix} (${suffix})` && f.period === period);

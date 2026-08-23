@@ -91,6 +91,34 @@ export const CORE_METRICS = [
   'PaymentsToAcquirePropertyPlantAndEquipment',
 ] as const;
 
+/** BS/IS/CF classification per CORE_METRICS tag -- consumed by scripts/ingest.ts to populate
+ *  FinancialFact.statement for SEC-sourced facts. (th.ts's ThFinancialRow already carries its own
+ *  statementType from the ก.ล.ต. financial_statement field directly; this table exists because
+ *  SecFactRow has no equivalent field of its own.) */
+export const STATEMENT_BY_TAG: Record<(typeof CORE_METRICS)[number], 'BS' | 'IS' | 'CF'> = {
+  Revenues: 'IS',
+  RevenueFromContractWithCustomerExcludingAssessedTax: 'IS',
+  OperatingIncomeLoss: 'IS',
+  NetIncomeLoss: 'IS',
+  EarningsPerShareDiluted: 'IS',
+  Assets: 'BS',
+  Liabilities: 'BS',
+  StockholdersEquity: 'BS',
+  CashAndCashEquivalentsAtCarryingValue: 'BS',
+  LongTermDebtNoncurrent: 'BS',
+  NetCashProvidedByUsedInOperatingActivities: 'CF',
+  PaymentsToAcquirePropertyPlantAndEquipment: 'CF',
+};
+
+/** Only EarningsPerShareDiluted is a per-share figure among CORE_METRICS -- everything else is a
+ *  total/balance that a split doesn't affect. SEC/XBRL facts are as-filed historical figures, not
+ *  verified against a split that may have happened since, so this is false (not "unknown"/null)
+ *  rather than true the way a live Yahoo fact would be -- see FinancialFact.splitAdjusted's schema
+ *  comment for the true/false/null distinction. */
+export const SPLIT_ADJUSTED_BY_TAG: Partial<Record<(typeof CORE_METRICS)[number], boolean>> = {
+  EarningsPerShareDiluted: false,
+};
+
 export function selectAnnual(rows: SecFactRow[], years = 5): SecFactRow[] {
   const wanted = new Set<string>(CORE_METRICS);
   const seen = new Set<string>();
