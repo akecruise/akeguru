@@ -65,6 +65,11 @@ async function refreshTicker(
 
   const currency = fetched.currency ?? DEFAULT_CURRENCY[market];
   const marketCapUsd = fetched.marketCap != null ? fetched.marketCap * fxRateToUsd : undefined;
+  // Liquidity check (Phase 1): 3-month avg daily volume x price, converted to USD the same way
+  // marketCapUsd is above, for a cross-market-comparable "can I actually trade this size" figure.
+  // See lib/scoring.ts for the tiers/modifier this feeds into.
+  const avgDailyValueUsd =
+    fetched.averageVolume != null && fetched.price != null ? fetched.averageVolume * fetched.price * fxRateToUsd : undefined;
   // Confirmed non-payer (summaryDetail returned but no yield) -> write 0, not null, so scoring
   // never needs a dividend-specific "missing vs. zero" branch. A whole-ticker fetch failure
   // (caught below, never reaches here) is the only case that leaves dividendYield untouched.
@@ -84,6 +89,7 @@ async function refreshTicker(
     ...(fetched.marketCap != null && { marketCap: fetched.marketCap }),
     ...(marketCapUsd != null && { marketCapUsd }),
     ...(fxRateToUsd != null && { fxRateToUsd }),
+    ...(avgDailyValueUsd != null && { avgDailyValueUsd }),
     ...(fetched.sharesOutstanding != null && { sharesOutstanding: fetched.sharesOutstanding }),
     ...(fetched.fiftyTwoWeekHigh != null && { fiftyTwoWeekHigh: fetched.fiftyTwoWeekHigh }),
     ...(fetched.fiftyTwoWeekLow != null && { fiftyTwoWeekLow: fetched.fiftyTwoWeekLow }),
@@ -239,6 +245,7 @@ async function scoreMarket(prisma: PrismaClient, market: MarketCode): Promise<vo
     interestCoverage: s.interestCoverage,
     dividendYield: s.dividendYield,
     payoutRatio: s.payoutRatio,
+    avgDailyValueUsd: s.avgDailyValueUsd,
     financialHistory: s.financialHistory,
     priceHistory: s.priceHistory,
   }));
@@ -259,6 +266,7 @@ async function scoreMarket(prisma: PrismaClient, market: MarketCode): Promise<vo
         dividendScore: result.dividendScore,
         momentumScore: result.momentumScore,
         overallScore: result.overallScore,
+        liquidityTier: result.liquidityTier,
         rawMetricsJson: result.rawMetrics as unknown as Prisma.InputJsonValue,
       },
       update: {
@@ -269,6 +277,7 @@ async function scoreMarket(prisma: PrismaClient, market: MarketCode): Promise<vo
         dividendScore: result.dividendScore,
         momentumScore: result.momentumScore,
         overallScore: result.overallScore,
+        liquidityTier: result.liquidityTier,
         rawMetricsJson: result.rawMetrics as unknown as Prisma.InputJsonValue,
       },
     });
@@ -283,6 +292,7 @@ async function scoreMarket(prisma: PrismaClient, market: MarketCode): Promise<vo
         latestHealthScore: result.healthScore,
         latestDividendScore: result.dividendScore,
         latestMomentumScore: result.momentumScore,
+        latestLiquidityTier: result.liquidityTier,
         latestScoreDate: date,
       },
     });

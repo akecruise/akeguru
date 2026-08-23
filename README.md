@@ -40,6 +40,8 @@ npm run refresh          # pull fundamentals for the curated ticker universe fro
 
 `npm run refresh` runs `scripts/refresh-universe.ts` — it fetches fundamentals, financial history, and price history for every ticker in `lib/data/universe-{th,us,hk}.ts`, then computes Snowflake scores. It's safe to re-run; everything is upserted.
 
+**Liquidity check**: `Stock.avgDailyValueUsd` (3-month avg daily volume × price, converted to USD) feeds a modifier on `overallScore` (`lib/scoring.ts`) — not a 6th Snowflake dimension, since "can I actually trade this size" is an absolute threshold, not a cohort-relative percentile. Tiers (`Stock.latestLiquidityTier` / `ScoreSnapshot.liquidityTier`): `high` (≥ $5M/day, no discount) → `medium` (≥ $1M, ×0.9) → `low` (≥ $200K, ×0.75) → `illiquid` (< $200K, ×0.5); `null` (unknown volume) applies no discount rather than penalizing missing data. Sized for a personal investor building/trimming a position over days, not institutional block-trading size — revisit the cutoffs once real WAIT/regret history (`scripts/scorecard.ts`) says otherwise.
+
 > **Note on `prisma db push` vs `prisma migrate dev`**: the local `prisma dev` engine doesn't support a genuine second (shadow) database, so `prisma migrate dev` fails there. Local iteration uses `db push` instead. When deploying against a real Postgres (Neon, Prisma Postgres, etc.), generate a proper baseline migration there with `prisma migrate dev --create-only`.
 
 ### 3. Run the app

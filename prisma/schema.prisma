@@ -58,6 +58,7 @@ model Stock {
   marketCap         Float?
   marketCapUsd      Float? // marketCap converted at refresh-time FX rate — use this (not marketCap) for cross-market screener sort/filter
   fxRateToUsd       Float? // 1.0 for US tickers; THB->USD rate captured at refresh time for TH tickers
+  avgDailyValueUsd  Float? // 3-month avg daily volume x price x fxRateToUsd -- see lib/scoring.ts's liquidity modifier
   sharesOutstanding Float?
   fiftyTwoWeekHigh  Float?
   fiftyTwoWeekLow   Float?
@@ -115,6 +116,7 @@ model Stock {
   latestHealthScore   Float?
   latestDividendScore Float?
   latestMomentumScore Float? // not part of the 5-petal Snowflake radar; used by the configurable-weight screener ranking
+  latestLiquidityTier String?   // 'high' | 'medium' | 'low' | 'illiquid' | null (unknown) -- see lib/scoring.ts; latestOverallScore already has this discount applied, this is just for display/filtering
   latestScoreDate     DateTime?
 
   isActive      Boolean   @default(true)
@@ -176,7 +178,8 @@ model ScoreSnapshot {
   healthScore    Float?
   dividendScore  Float?
   momentumScore  Float? // price-based, from PriceHistory; not one of the 5 Snowflake petals
-  overallScore   Float?
+  overallScore   Float? // already has the liquidity modifier applied (see lib/scoring.ts) -- liquidityTier below is the "why", not a separate un-applied score
+  liquidityTier  String? // 'high' | 'medium' | 'low' | 'illiquid' | null (avgDailyValueUsd unknown)
   // Per metric: { value, percentile }. Per dimension: { availableCount, totalCount } for "limited data" UI badges.
   rawMetricsJson Json?
   createdAt      DateTime @default(now())

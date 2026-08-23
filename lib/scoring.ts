@@ -30,6 +30,7 @@ export interface ScorableStock {
   interestCoverage: number | null;
   dividendYield: number | null;
   payoutRatio: number | null;
+  avgDailyValueUsd: number | null;
   financialHistory: FinancialHistoryPoint[];
   priceHistory: PriceHistoryPoint[];
 }
@@ -57,6 +58,7 @@ export interface ScoreResult {
   dividendScore: number | null;
   momentumScore: number | null;
   overallScore: number | null;
+  liquidityTier: "high" | "medium" | "low" | "illiquid" | null;
   rawMetrics: RawMetrics;
 }
 
@@ -168,6 +170,31 @@ function percentileOf(value: number, sortedValues: number[]): number {
   return (countLte / sortedValues.length) * 100;
 }
 
+/**
+ * Liquidity check (Phase 1 roadmap item) — a modifier on overallScore, not a percentile-ranked
+ * dimension of its own: "can I actually build/exit a position in this without moving the price"
+ * doesn't get better the higher it goes past some point the way a value/growth metric does, and
+ * it isn't cohort-relative either (a thin TH stock isn't "liquid" just because most TH stocks are
+ * thinner still) — a fixed absolute-dollar threshold is the right shape here, not percentileOf().
+ *
+ * Thresholds are sized for a personal investor building/trimming a position over days, not
+ * institutional block-trading size — deliberately lower than a fund's liquidity screen would use.
+ * Revisit these numbers once real WAIT/regret history (scripts/scorecard.ts) or an actual thin-name
+ * near-miss shows they're off; there's no live data behind these specific cutoffs yet.
+ */
+const LIQUIDITY_TIERS: Array<{ tier: NonNullable<ScoreResult["liquidityTier"]>; minUsd: number; modifier: number }> = [
+  { tier: "high", minUsd: 5_000_000, modifier: 1.0 },
+  { tier: "medium", minUsd: 1_000_000, modifier: 0.9 },
+  { tier: "low", minUsd: 200_000, modifier: 0.75 },
+  { tier: "illiquid", minUsd: 0, modifier: 0.5 },
+];
+
+function liquidityModifier(avgDailyValueUsd: number | null): { tier: ScoreResult["liquidityTier"]; modifier: number } {
+  if (avgDailyValueUsd == null) return { tier: null, modifier: 1 }; // unknown -> don't penalize for missing data
+  const band = LIQUIDITY_TIERS.find((b) => avgDailyValueUsd >= b.minUsd)!; // last band's minUsd=0 always matches
+  return { tier: band.tier, modifier: band.modifier };
+}
+
 function payoutRatioBandScore(ratio: number): number {
   if (ratio < 0 || ratio > 1) return 0; // negative earnings, or paying out more than earned
   if (ratio >= 0.2 && ratio <= 0.75) return 5; // healthy range
@@ -264,9 +291,12 @@ export function scoreCohort(stocks: ScorableStock[]): Map<string, ScoreResult> {
 
     const dims = [value.score, future.score, past.score, health.score, dividendScore];
     const availableDims = dims.filter((d): d is number => d != null);
-    const overallScore = availableDims.length > 0
+    const rawOverallScore = availableDims.length > 0
       ? (availableDims.reduce((a, b) => a + b, 0) / (availableDims.length * 5)) * 100
       : null;
+
+    const { tier: liquidityTier, modifier: liquidityMod } = liquidityModifier(s.avgDailyValueUsd);
+    const overallScore = rawOverallScore != null ? rawOverallScore * liquidityMod : null;
 
     results.set(s.id, {
       valueScore: value.score,
@@ -276,6 +306,7 @@ export function scoreCohort(stocks: ScorableStock[]): Map<string, ScoreResult> {
       dividendScore,
       momentumScore: momentum.score,
       overallScore,
+      liquidityTier,
       rawMetrics: {
         metrics: {
           ...value.metricDetails,

@@ -19,6 +19,9 @@ export interface FetchedStock {
   price?: number;
   priceChangePct1d?: number;
   marketCap?: number;
+  /** 3-month average daily volume (shares/day) — combined with price for the liquidity check, see
+   *  lib/refresh.ts's avgDailyValueUsd computation and lib/scoring.ts's modifier. */
+  averageVolume?: number;
   sharesOutstanding?: number;
   fiftyTwoWeekHigh?: number;
   fiftyTwoWeekLow?: number;
@@ -88,6 +91,7 @@ export async function fetchStockQuoteSummary(ticker: string): Promise<FetchedSto
     price: r.price?.regularMarketPrice ?? undefined,
     priceChangePct1d: r.price?.regularMarketChangePercent ?? undefined,
     marketCap: r.price?.marketCap ?? r.summaryDetail?.marketCap ?? undefined,
+    averageVolume: r.summaryDetail?.averageVolume ?? undefined,
     sharesOutstanding: r.defaultKeyStatistics?.sharesOutstanding ?? undefined,
     fiftyTwoWeekHigh: r.summaryDetail?.fiftyTwoWeekHigh ?? undefined,
     fiftyTwoWeekLow: r.summaryDetail?.fiftyTwoWeekLow ?? undefined,
