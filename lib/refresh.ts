@@ -1,3 +1,5 @@
+import fs from "fs/promises";
+import path from "path";
 import pLimit from "p-limit";
 import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import { UNIVERSE_TH } from "./data/universe-th";
@@ -11,6 +13,7 @@ import {
   type MarketCode,
 } from "./yahoo";
 import { scoreCohort, type ScorableStock } from "./scoring";
+import { report } from "./progress";
 
 // Shared by scripts/refresh-universe.ts (CLI/local, own direct-connection Prisma client) and
 // app/api/cron/refresh/route.ts (Vercel Cron, own direct-connection Prisma client) — both build
@@ -288,6 +291,39 @@ async function scoreMarket(prisma: PrismaClient, market: MarketCode): Promise<vo
   console.log(`[refresh] scored ${results.size} ${market} stocks`);
 }
 
+/**
+ * Appends a one-run summary to the vault's Pipeline Dashboard.md -- same "skip if unset, never
+ * fail the run over it" convention as lib/report/obsidian-export.ts (a Vercel-hosted instance has
+ * no filesystem access to a local vault either, same reasoning that file documents). Append-only
+ * (not a rewrite) so history accumulates across runs instead of only ever showing the latest one.
+ */
+async function appendToObsidianDashboard(
+  runId: string,
+  result: RefreshResult,
+  startedAt: Date,
+  finishedAt: Date,
+  failures: Failure[],
+): Promise<void> {
+  const vaultRoot = process.env.OBSIDIAN_VAULT_PATH;
+  if (!vaultRoot) return;
+
+  const durationMin = ((finishedAt.getTime() - startedAt.getTime()) / 60_000).toFixed(1);
+  const statusIcon = result.status === "SUCCESS" ? "✅" : result.status === "PARTIAL" ? "⚠️" : "❌";
+  const failureLines = failures.length
+    ? failures.slice(0, 10).map((f) => `  - ${f.ticker}: ${f.message}`).join("\n")
+    : "  - none";
+
+  const block = [
+    `## Refresh ${runId}`,
+    `- Status: ${statusIcon} ${result.status} | ${result.processed} processed, ${result.failed} failed | ${durationMin}m`,
+    `- Failures:${failures.length ? "\n" + failureLines : " none"}`,
+    "",
+  ].join("\n");
+
+  const filePath = path.join(vaultRoot, "Pipeline Dashboard.md");
+  await fs.appendFile(filePath, `\n${block}`, "utf-8");
+}
+
 export interface RefreshResult {
   status: "SUCCESS" | "PARTIAL" | "FAILED";
   processed: number;
@@ -296,6 +332,7 @@ export interface RefreshResult {
 
 export async function runRefresh(prisma: PrismaClient): Promise<RefreshResult> {
   const startedAt = new Date();
+  const runId = startedAt.toISOString().replace(/[:.]/g, "-");
   const log = await prisma.refreshLog.create({
     data: { startedAt, status: "FAILED" }, // overwritten below; defaults to FAILED in case of a crash before we update it
   });
@@ -306,68 +343,110 @@ export async function runRefresh(prisma: PrismaClient): Promise<RefreshResult> {
     ...UNIVERSE_HK.map((ticker) => ({ ticker, market: "HK" as const })),
   ];
 
-  const fxRates: Record<MarketCode, number> = {
-    TH: await fetchFxRateToUsd("TH"),
-    US: 1,
-    HK: await fetchFxRateToUsd("HK"),
-  };
-
-  const limit = pLimit(CONCURRENCY);
-  const failures: Failure[] = [];
-  let processed = 0;
-  let breakerTripped = false;
-
-  await Promise.all(
-    tickers.map(({ ticker, market }) =>
-      limit(async () => {
-        if (breakerTripped) return;
-        try {
-          await refreshTicker(prisma, ticker, market, fxRates[market]);
-        } catch (err) {
-          failures.push({ ticker, message: (err as Error).message });
-        } finally {
-          processed++;
-          if (
-            processed >= CIRCUIT_BREAKER_MIN_PROCESSED &&
-            failures.length / processed > CIRCUIT_BREAKER_FAILURE_RATIO
-          ) {
-            breakerTripped = true;
-          }
-        }
-      }),
-    ),
-  );
-
-  try {
-    await scoreMarket(prisma, "TH");
-    await scoreMarket(prisma, "US");
-    await scoreMarket(prisma, "HK");
-  } catch (err) {
-    console.error("[refresh] scoring pass failed:", err);
-  }
-
-  const status: RefreshResult["status"] = breakerTripped
-    ? "FAILED"
-    : failures.length > 0
-      ? "PARTIAL"
-      : "SUCCESS";
-
-  await prisma.refreshLog.update({
-    where: { id: log.id },
-    data: {
-      finishedAt: new Date(),
-      status,
-      tickersProcessed: processed,
-      tickersFailed: failures.length,
-      errorSummary:
-        failures.length > 0
-          ? (breakerTripped ? "Circuit breaker tripped. " : "") +
-            failures.slice(0, 20).map((f) => `${f.ticker}: ${f.message}`).join("; ")
-          : null,
-    },
+  report({
+    runId,
+    startedAt: startedAt.toISOString(),
+    currentStage: "fetch",
+    stage: 1,
+    totalStages: 3,
+    tickersDone: 0,
+    tickersTotal: tickers.length,
+    status: "running",
+    lastError: null,
   });
 
-  console.log(`[refresh] done: ${status}, processed=${processed}, failed=${failures.length}${breakerTripped ? " (circuit breaker tripped)" : ""}`);
+  // Anything below can throw before reaching the refreshLog.update()/report() calls that record a
+  // final status either way -- without this, a crash here (e.g. fetchFxRateToUsd failing) would
+  // leave logs/status.json parked at "running" forever, which a watcher (scripts/watch-status.ps1)
+  // has no way to tell apart from a run that's still actually in progress.
+  try {
+    const fxRates: Record<MarketCode, number> = {
+      TH: await fetchFxRateToUsd("TH"),
+      US: 1,
+      HK: await fetchFxRateToUsd("HK"),
+    };
 
-  return { status, processed, failed: failures.length };
+    const limit = pLimit(CONCURRENCY);
+    const failures: Failure[] = [];
+    let processed = 0;
+    let breakerTripped = false;
+
+    await Promise.all(
+      tickers.map(({ ticker, market }) =>
+        limit(async () => {
+          if (breakerTripped) return;
+          try {
+            await refreshTicker(prisma, ticker, market, fxRates[market]);
+          } catch (err) {
+            failures.push({ ticker, message: (err as Error).message });
+          } finally {
+            processed++;
+            if (
+              processed >= CIRCUIT_BREAKER_MIN_PROCESSED &&
+              failures.length / processed > CIRCUIT_BREAKER_FAILURE_RATIO
+            ) {
+              breakerTripped = true;
+            }
+            // Passed straight from in-memory counters (not "read the file, add one"), so this
+            // stays correct even with CONCURRENCY calls landing their writes out of order.
+            report({ tickersDone: processed, lastError: failures.at(-1)?.message ?? null });
+          }
+        }),
+      ),
+    );
+
+    report({ currentStage: "scoring", stage: 2 });
+    try {
+      await scoreMarket(prisma, "TH");
+      await scoreMarket(prisma, "US");
+      await scoreMarket(prisma, "HK");
+    } catch (err) {
+      console.error("[refresh] scoring pass failed:", err);
+    }
+
+    const status: RefreshResult["status"] = breakerTripped
+      ? "FAILED"
+      : failures.length > 0
+        ? "PARTIAL"
+        : "SUCCESS";
+    const finishedAt = new Date();
+
+    await prisma.refreshLog.update({
+      where: { id: log.id },
+      data: {
+        finishedAt,
+        status,
+        tickersProcessed: processed,
+        tickersFailed: failures.length,
+        errorSummary:
+          failures.length > 0
+            ? (breakerTripped ? "Circuit breaker tripped. " : "") +
+              failures.slice(0, 20).map((f) => `${f.ticker}: ${f.message}`).join("; ")
+            : null,
+      },
+    });
+
+    const result: RefreshResult = { status, processed, failed: failures.length };
+
+    report({
+      currentStage: "done",
+      stage: 3,
+      status: status === "FAILED" ? "failed" : "done",
+      tickersDone: processed,
+      lastError: failures.length > 0 ? `${failures.length} ticker(s) failed` : null,
+    });
+
+    try {
+      await appendToObsidianDashboard(runId, result, startedAt, finishedAt, failures);
+    } catch (err) {
+      console.error("[refresh] Obsidian dashboard append failed (non-fatal):", err);
+    }
+
+    console.log(`[refresh] done: ${status}, processed=${processed}, failed=${failures.length}${breakerTripped ? " (circuit breaker tripped)" : ""}`);
+
+    return result;
+  } catch (err) {
+    report({ currentStage: "crashed", status: "failed", lastError: (err as Error).message });
+    throw err;
+  }
 }

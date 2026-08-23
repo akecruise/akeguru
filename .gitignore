@@ -36,6 +36,9 @@ yarn-error.log*
 # archived raw source files fetched by scripts/ingest.ts (RawSource) — never commit these
 /raw-sources
 
+# scripts/run-refresh-task.ps1's per-run logs (Windows Task Scheduler)
+/logs
+
 # vercel
 .vercel
 
