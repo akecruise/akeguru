@@ -820,4 +820,54 @@ const DEBT_FACTS: RealFact[] = [{ id: "cmt-de-real", metricName: "Debt/Equity", 
   if (!caughtAsUnsupportedNumber) process.exitCode = 1;
 }
 
+// ---------- Case 29: singular/plural near-miss should NOT be flagged — real false positive from a
+// live claude-cli NVDA valuation run (2026-08-23) ----------
+// Agent wrote "Revenue (FY2026, 10-K)" for a fact labeled "Revenues" (SEC's plural XBRL tag).
+// Normalized+suffixed ("revenuefy202610k") doesn't contain "revenues" as a substring -- the "s"
+// breaks it right after "revenue" -- so the plain substring check alone missed this.
+
+const PLURAL_TRANSLATION: Fundamentals = {
+  profile: {
+    label: "Profile",
+    metrics: [{ name: "Revenue (FY2026, 10-K)", value: 130497000000, unit: "currency", factId: "nvda-rev-2026" }],
+  },
+  margins: { label: "Margins", metrics: [] },
+  returns: { label: "Returns", metrics: [] },
+  valuationTTM: { label: "Valuation (TTM)", metrics: [] },
+  valuationNTM: null,
+  financialHealth: { label: "Financial Health", metrics: [] },
+  growth: { label: "Growth", metrics: [] },
+  dividends: null,
+};
+const PLURAL_FACTS: RealFact[] = [{ id: "nvda-rev-2026", metricName: "Revenues", value: 130497000000, unit: "currency" }];
+
+{
+  const result = checkGrounding(PLURAL_TRANSLATION, PLURAL_FACTS);
+  check('29. "Revenue (FY2026, 10-K)"<->"Revenues" -> not a false positive', result.ok, true);
+}
+
+// ---------- Case 30: "Cash from Operations" (missing "Flow") <-> "CFO" should NOT be flagged —
+// real false positive from the same live NVDA run, one word short of the existing
+// "Cash Flow From Operations"<->"CFO" synonym pair (Case 24) ----------
+
+const CFO_NO_FLOW_TRANSLATION: Fundamentals = {
+  profile: {
+    label: "Profile",
+    metrics: [{ name: "Cash from Operations (TTM)", value: 76169000000, unit: "currency", factId: "nvda-cfo-ttm" }],
+  },
+  margins: { label: "Margins", metrics: [] },
+  returns: { label: "Returns", metrics: [] },
+  valuationTTM: { label: "Valuation (TTM)", metrics: [] },
+  valuationNTM: null,
+  financialHealth: { label: "Financial Health", metrics: [] },
+  growth: { label: "Growth", metrics: [] },
+  dividends: null,
+};
+const CFO_NO_FLOW_FACTS: RealFact[] = [{ id: "nvda-cfo-ttm", metricName: "CFO", value: 76169000000, unit: "currency" }];
+
+{
+  const result = checkGrounding(CFO_NO_FLOW_TRANSLATION, CFO_NO_FLOW_FACTS);
+  check('30. "Cash from Operations (TTM)"<->"CFO" -> not a false positive', result.ok, true);
+}
+
 console.log("\ndone.");

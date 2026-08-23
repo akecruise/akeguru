@@ -88,9 +88,15 @@ function expand(normalized: string): string {
 // "operating cash flow" vs "cash flow from operations"), and the wordTokens fallback can't help
 // either — "CFO" is only 3 characters, below the >=4 token-length filter, so it produces zero
 // tokens to overlap against. A direct synonym pair sidesteps both failure paths at once.
+// ["cashfromoperations", "cfo"]: confirmed real on a live claude-cli NVDA valuation run
+// (2026-08-23) — the agent wrote "Cash from Operations", not "Cash *Flow* from Operations" like
+// the pair above already covers. A legitimate, common alternate phrasing for the same figure, one
+// word short of matching the existing pair -- distinct enough (missing "flow" changes the
+// normalized string) that it needs its own entry rather than a substring tweak to the one above.
 const SYNONYM_PAIRS: [string, string][] = [
   ["capitalexpenditures", "paymentstoacquirepropertyplantandequipment"],
   ["cashflowfromoperations", "cfo"],
+  ["cashfromoperations", "cfo"],
 ];
 
 /** Splits camelCase/PascalCase words apart (XBRL tags like "EarningsPerShareDiluted" arrive as one
@@ -115,11 +121,24 @@ function wordTokens(s: string): string[] {
  * synonym pair, or any shared word token >=4 chars (camelCase-aware). Flags only a name with no
  * textual relationship at all.
  */
+// Naive English depluralization (strip one trailing "s") -- confirmed real on a live claude-cli
+// NVDA valuation run (2026-08-23): the agent wrote "Revenue (FY2026, 10-K)" for a fact labeled
+// "Revenues" (the plural XBRL tag). Normalized+suffixed, "revenuefy202610k" doesn't contain
+// "revenues" as a substring (the "s" breaks it right after "revenue"), so the plain substring
+// check above missed it even though "revenue" is a clean prefix match once the plural is stripped.
+// Applied to both sides since either the agent's label or the real tag could be the plural one.
+function depluralize(s: string): string {
+  return s.length > 1 && s.endsWith("s") ? s.slice(0, -1) : s;
+}
+
 function namesPlausiblyMatch(agentName: string, factMetricName: string): boolean {
   const a = normalize(agentName);
   const b = normalize(factMetricName);
   if (!a || !b) return false;
   if (a === b || a.includes(b) || b.includes(a)) return true;
+  const da = depluralize(a);
+  const db = depluralize(b);
+  if (da === db || a.includes(db) || b.includes(da)) return true;
   const ea = expand(a);
   const eb = expand(b);
   if (ea === eb || ea.includes(eb) || eb.includes(ea)) return true;
