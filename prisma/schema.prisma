@@ -417,3 +417,31 @@ enum GateRigor {
   PARTIAL // checked against Yahoo only
   MANUAL  // needs a human
 }
+
+enum RelationType {
+  SUPPLIER    // relatedTicker supplies inputs/components to ticker
+  CUSTOMER    // relatedTicker is a customer of ticker (buys from it)
+  COMPETITOR  // relatedTicker competes with ticker for the same demand
+  BENEFICIARY // relatedTicker benefits from ticker's business/spending without being a direct supplier/customer (e.g. a capex beneficiary)
+}
+
+// Phase 2 roadmap item ("CompanyRelation table") -- manually entered for now (see
+// scripts/add-company-relation.ts), same reasoning as Stock.themes: no agent exists yet to infer
+// these from business descriptions, and a wrong inferred relation silently feeding a future
+// Read-Across Engine (Phase 4 -- "fact changes -> rerun related tickers") would be worse than no
+// relation at all. One directed row per relationship fact -- ticker's perspective, relatedTicker is
+// the SUPPLIER/CUSTOMER/COMPETITOR/BENEFICIARY. A reciprocal relationship (e.g. two competitors)
+// needs its own row in the other direction if you want it queryable from both sides; nothing here
+// auto-derives the inverse.
+model CompanyRelation {
+  id            String       @id @default(cuid())
+  ticker        String
+  relatedTicker String
+  relationType  RelationType
+  notes         String?      @db.Text
+  createdAt     DateTime     @default(now())
+
+  @@unique([ticker, relatedTicker, relationType])
+  @@index([ticker])
+  @@index([relatedTicker])
+}

@@ -64,6 +64,7 @@ Visit `http://localhost:3000`. Register an account to use the watchlist and deep
 | `npx tsx scripts/backfill-fact-metadata.ts [--dry]` | One-time backfill of `FinancialFact.statement`/`sourceDefinition`/`splitAdjusted` for SEC-sourced rows ingested before that schema upgrade (2026-08-23) |
 | `npx tsx scripts/run-report.ts <TICKER>` | Compound OS: run the full agent pipeline for a ticker and save a `ResearchReport` |
 | `npx tsx scripts/scorecard.ts [TICKER]` | Verdict Scorecard: every `ResearchReport`'s decision vs. what the price did afterward, flags a WAIT that's run up 15%+ with no re-review as regret |
+| `npx tsx scripts/add-company-relation.ts <TICKER> <TYPE> <RELATED> ["notes"]` / `--list <TICKER>` | Manually record/list a `CompanyRelation` (supplier/customer/competitor/beneficiary) — see the model's doc comment in `prisma/schema.prisma` |
 | `powershell -File scripts/watch-status.ps1` | Live-view `logs/status.json` (the nightly refresh's progress) in a terminal |
 | `npx prisma studio` | Browse the database |
 
