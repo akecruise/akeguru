@@ -13,6 +13,7 @@ import { z } from "zod";
 import type { PrismaClient, Prisma } from "../../generated/prisma/client";
 import { validateSection, sectionSchemas, type SectionName } from "../report/schema";
 import { checkGrounding, checkBulletGrounding, checkMoatGrounding, checkClaimGrounding, type RealFact } from "./grounding";
+import { RateLimitError, FatalProviderError } from "./providers/errors";
 import type { Fundamentals, BulletItem, MoatItem, ClaimItem, Synthesis } from "../report/types";
 import * as anthropicProvider from "./providers/anthropic";
 import * as geminiProvider from "./providers/gemini";
@@ -65,6 +66,11 @@ const AGENT_MODEL_TIER = {
 type AgentModelKey = keyof typeof AGENT_MODEL_TIER;
 
 const MAX_RETRIES = 2; // 1 initial attempt + up to 2 retries = 3 attempts total
+const RATE_LIMIT_BACKOFF_MS = 5_000; // multiplied by (attempt + 1) — 5s, then 10s
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 interface AgentFile {
   name: string;
@@ -205,12 +211,29 @@ export async function runAgent(
   let lastErrors: string[] = [];
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    // lastErrors.length (not attempt === 0) picks the prompt shape: a transient provider failure
+    // (caught below) resets lastErrors to [] before its retry, since there's no content problem to
+    // describe back to the model — it should just see the same clean prompt again, not a
+    // "your previous output failed validation" message about output that was never produced.
     const userMessage =
-      attempt === 0
+      lastErrors.length === 0
         ? `FinancialFact สำหรับ ${ticker} (${facts.length} รายการ):\n${factsBlock}${contextBlock}`
         : `FinancialFact สำหรับ ${ticker} (${facts.length} รายการ):\n${factsBlock}${contextBlock}\n\nOutput รอบก่อนไม่ผ่าน validation ด้วย error เหล่านี้ — แก้แล้วส่ง JSON ทั้งก้อนใหม่:\n${lastErrors.map((e) => `- ${e}`).join("\n")}`;
 
-    const text = await provider.generate(agent.instructions, userMessage, jsonSchema);
+    let text: string;
+    try {
+      text = await provider.generate(agent.instructions, userMessage, jsonSchema);
+    } catch (e) {
+      // FatalProviderError (not logged in, no API key, CLI missing) — a retry can't fix a
+      // misconfiguration, so fail fast instead of burning the remaining attempts on it.
+      if (e instanceof FatalProviderError || attempt === MAX_RETRIES) throw e;
+      // Everything else (timeout, non-zero exit, a malformed response envelope, RateLimitError) is
+      // presumed transient. Back off on a rate limit specifically — every other transient case is
+      // worth retrying immediately, no reason to wait.
+      if (e instanceof RateLimitError) await sleep(RATE_LIMIT_BACKOFF_MS * (attempt + 1));
+      lastErrors = [];
+      continue;
+    }
 
     const parsed = tryParseJson(text);
     if (parsed === undefined) {

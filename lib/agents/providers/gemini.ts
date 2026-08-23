@@ -1,4 +1,4 @@
-import { RateLimitError } from "./errors";
+import { RateLimitError, FatalProviderError } from "./errors";
 
 /** Google AI Studio (generativelanguage.googleapis.com) — free tier. */
 const API_KEY = process.env.GEMINI_API_KEY ?? "";
@@ -30,7 +30,7 @@ async function doRequest(systemPrompt: string, userPrompt: string): Promise<Resp
 // signature so every provider shares one call shape (see lib/agents/runner.ts).
 export async function generate(systemPrompt: string, userPrompt: string, jsonSchema?: Record<string, unknown>): Promise<string> {
   void jsonSchema;
-  if (!API_KEY) throw new Error("GEMINI_API_KEY ไม่ได้ตั้ง — สมัครฟรีที่ https://aistudio.google.com/apikey");
+  if (!API_KEY) throw new FatalProviderError("gemini", "GEMINI_API_KEY ไม่ได้ตั้ง — สมัครฟรีที่ https://aistudio.google.com/apikey");
 
   let res = await doRequest(systemPrompt, userPrompt);
   for (const delay of TRANSIENT_RETRY_DELAYS_MS) {

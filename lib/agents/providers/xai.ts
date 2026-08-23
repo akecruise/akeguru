@@ -1,4 +1,4 @@
-import { RateLimitError } from "./errors";
+import { RateLimitError, FatalProviderError } from "./errors";
 
 /**
  * x.ai (Grok) — OpenAI-compatible chat completions. Not Groq (different company, similar name —
@@ -20,7 +20,7 @@ interface XaiResponse {
 // signature so every provider shares one call shape (see lib/agents/runner.ts).
 export async function generate(systemPrompt: string, userPrompt: string, jsonSchema?: Record<string, unknown>): Promise<string> {
   void jsonSchema;
-  if (!API_KEY) throw new Error("XAI_API_KEY ไม่ได้ตั้ง — สมัครที่ https://console.x.ai");
+  if (!API_KEY) throw new FatalProviderError("xai", "XAI_API_KEY ไม่ได้ตั้ง — สมัครที่ https://console.x.ai");
 
   const res = await fetch("https://api.x.ai/v1/chat/completions", {
     method: "POST",

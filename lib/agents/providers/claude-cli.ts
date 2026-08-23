@@ -1,5 +1,5 @@
 import { spawn } from "child_process";
-import { RateLimitError } from "./errors";
+import { RateLimitError, FatalProviderError } from "./errors";
 
 /**
  * Local Claude Code CLI, headless (`claude -p`) — the primary provider now that the deploy target
@@ -133,7 +133,7 @@ export async function generate(systemPrompt: string, userPrompt: string, jsonSch
 
   if (outcome.spawnError) {
     if (outcome.spawnError.code === "ENOENT") {
-      throw new Error("claude-cli: `claude` CLI ไม่พบใน PATH — ติดตั้งจาก https://claude.com/claude-code ก่อน");
+      throw new FatalProviderError("claude-cli", "`claude` CLI ไม่พบใน PATH — ติดตั้งจาก https://claude.com/claude-code ก่อน");
     }
     throw new Error(`claude-cli: spawn ล้มเหลว — ${outcome.spawnError.message}`);
   }
@@ -161,7 +161,7 @@ export async function generate(systemPrompt: string, userPrompt: string, jsonSch
       parsed.api_error_status === 403 ||
       /not logged in|authentication|unauthorized|please run.*login|no api key|invalid.*api.?key/i.test(detail)
     ) {
-      throw new Error(`claude-cli: ยังไม่ได้ login หรือ auth ใช้ไม่ได้ — รัน \`claude login\` ก่อน (${detail})`);
+      throw new FatalProviderError("claude-cli", `ยังไม่ได้ login หรือ auth ใช้ไม่ได้ — รัน \`claude login\` ก่อน (${detail})`);
     }
     throw new Error(`claude-cli: ${detail}`);
   }

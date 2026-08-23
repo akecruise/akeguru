@@ -1,4 +1,4 @@
-import { RateLimitError } from "./errors";
+import { RateLimitError, FatalProviderError } from "./errors";
 
 /**
  * Groq (api.groq.com) — OpenAI-compatible chat completions, free tier.
@@ -29,7 +29,7 @@ interface GroqResponse {
 // signature so every provider shares one call shape (see lib/agents/runner.ts).
 export async function generate(systemPrompt: string, userPrompt: string, jsonSchema?: Record<string, unknown>): Promise<string> {
   void jsonSchema;
-  if (!API_KEY) throw new Error("GROQ_API_KEY ไม่ได้ตั้ง — สมัครฟรีที่ https://console.groq.com/keys");
+  if (!API_KEY) throw new FatalProviderError("groq", "GROQ_API_KEY ไม่ได้ตั้ง — สมัครฟรีที่ https://console.groq.com/keys");
 
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",

@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { RateLimitError } from "./errors";
+import { RateLimitError, FatalProviderError } from "./errors";
 
 let _client: Anthropic | null = null;
 function getClient(): Anthropic {
@@ -17,6 +17,7 @@ export const MODEL_NAME = process.env.ANTHROPIC_MODEL ?? "claude-opus-5";
 // signature so every provider shares one call shape (see lib/agents/runner.ts).
 export async function generate(systemPrompt: string, userPrompt: string, jsonSchema?: Record<string, unknown>): Promise<string> {
   void jsonSchema;
+  if (!process.env.ANTHROPIC_API_KEY) throw new FatalProviderError("anthropic", "ANTHROPIC_API_KEY ไม่ได้ตั้ง");
   const client = getClient();
   try {
     const stream = client.messages.stream({
@@ -34,6 +35,9 @@ export async function generate(systemPrompt: string, userPrompt: string, jsonSch
   } catch (e) {
     if (e instanceof Anthropic.APIError && e.status === 429) {
       throw new RateLimitError("anthropic", e.message);
+    }
+    if (e instanceof Anthropic.APIError && (e.status === 401 || e.status === 403)) {
+      throw new FatalProviderError("anthropic", e.message);
     }
     throw e;
   }
