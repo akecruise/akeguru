@@ -169,6 +169,17 @@ export default async function StockPage({
       })()
     : null;
 
+  // Sector Concentration context (Phase 5 extension) -- how many of the signed-in user's *other*
+  // watchlist tickers already share this stock's sector, shown alongside a position-size suggestion
+  // as context, not a math adjustment to the suggested weight itself: there's no validated study
+  // behind any specific size discount for sector concentration, so inventing one would be the same
+  // fabricated-precision mistake lib/position-sizing.ts's doc comment already rejects for Kelly.
+  const sameSectorWatchlistCount = positionSize && user && stock.sector
+    ? await prisma.watchlistItem.count({
+        where: { userId: user.id, stockId: { not: stock.id }, stock: { sector: stock.sector } },
+      })
+    : 0;
+
   return (
     <main className="mx-auto max-w-4xl px-6 py-10">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
@@ -241,6 +252,11 @@ export default async function StockPage({
             <p className="mt-3 text-sm text-black/60 dark:text-white/60">
               <span className="font-medium">Suggested position size:</span> {positionSize.suggestedWeightPct.toFixed(1)}% of capital
               <span className="text-xs text-black/40 dark:text-white/40"> (inverse-volatility sizing, {(positionSize.annualizedVol * 100).toFixed(1)}% annualized vol — a starting point, not an allocator)</span>
+              {sameSectorWatchlistCount > 0 && (
+                <span className="mt-1 block text-xs text-amber-700 dark:text-amber-400">
+                  {sameSectorWatchlistCount} other watchlist ticker{sameSectorWatchlistCount === 1 ? "" : "s"} already in {stock.sector} — worth checking sector concentration before sizing this in.
+                </span>
+              )}
             </p>
           )}
 

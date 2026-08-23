@@ -47,3 +47,38 @@ export function computeFactorOverlap(tickerExposures: TickerFactorExposure[]): F
   for (const row of rows) row.count = row.tickers.length;
   return rows.filter((r) => r.count >= OVERLAP_MIN_COUNT).sort((a, b) => b.count - a.count);
 }
+
+/**
+ * Sector Concentration -- same "watchlist as portfolio proxy, catch what reviewing tickers one at a
+ * time wouldn't easily spot" idea as computeFactorOverlap, but on Stock.sector instead of macro
+ * factor exposure. Deliberately simpler: sector is always exactly one value per stock (not a
+ * weighted judgment call the way factor exposure is), already sitting on every Stock row, so no
+ * agent output or grounding is involved -- pure counting, same threshold (OVERLAP_MIN_COUNT) as the
+ * factor version for consistency, not because 3 has been separately validated for sector risk.
+ */
+export interface TickerSector {
+  ticker: string;
+  sector: string | null;
+}
+
+export interface SectorConcentrationRow {
+  sector: string;
+  tickers: string[];
+  count: number;
+}
+
+export function computeSectorConcentration(tickerSectors: TickerSector[]): SectorConcentrationRow[] {
+  const groups = new Map<string, string[]>();
+
+  for (const { ticker, sector } of tickerSectors) {
+    if (!sector) continue; // no sector on record -- skip rather than group under a fake "unknown" bucket
+    const tickers = groups.get(sector) ?? [];
+    tickers.push(ticker);
+    groups.set(sector, tickers);
+  }
+
+  return [...groups.entries()]
+    .map(([sector, tickers]) => ({ sector, tickers, count: tickers.length }))
+    .filter((r) => r.count >= OVERLAP_MIN_COUNT)
+    .sort((a, b) => b.count - a.count);
+}

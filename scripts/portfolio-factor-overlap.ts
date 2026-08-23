@@ -4,6 +4,8 @@
  * latest ResearchReport.payload.factorSensitivity (Phase 2's Factor Sensitivity Agent output) and
  * flags any macro factor at least OVERLAP_MIN_COUNT tickers share a 'high'-weight exposure to in the
  * same direction -- a concentration risk a human reviewing tickers one at a time wouldn't easily spot.
+ * Also flags Sector Concentration (computeSectorConcentration) the same way, straight off Stock.sector
+ * -- no ResearchReport needed for that half.
  *
  *   npx tsx scripts/portfolio-factor-overlap.ts <email>
  */
@@ -12,7 +14,7 @@ import pg from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../generated/prisma/client";
 import type { StockReport } from "../lib/report/types";
-import { computeFactorOverlap, type TickerFactorExposure } from "../lib/portfolio-factor-overlap";
+import { computeFactorOverlap, computeSectorConcentration, type TickerFactorExposure, type TickerSector } from "../lib/portfolio-factor-overlap";
 
 const pool = new pg.Pool({ connectionString: process.env.DIRECT_URL });
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
@@ -27,7 +29,7 @@ async function main() {
 
   const user = await prisma.user.findUnique({
     where: { email },
-    select: { watchlistItems: { select: { stock: { select: { ticker: true } } } } },
+    select: { watchlistItems: { select: { stock: { select: { ticker: true, sector: true } } } } },
   });
   if (!user) {
     console.log(`no User with email ${email}`);
@@ -38,6 +40,13 @@ async function main() {
   if (!tickers.length) {
     console.log(`${email} has no watchlist items -- nothing to check`);
     return;
+  }
+
+  const tickerSectors: TickerSector[] = user.watchlistItems.map((w) => ({ ticker: w.stock.ticker, sector: w.stock.sector }));
+  const sectorConcentration = computeSectorConcentration(tickerSectors);
+  if (sectorConcentration.length) {
+    console.log("\nsector concentration:");
+    for (const row of sectorConcentration) console.log(`  ${row.sector}: ${row.count} tickers (${row.tickers.join(", ")})`);
   }
 
   const tickerExposures: TickerFactorExposure[] = [];
@@ -64,7 +73,7 @@ async function main() {
 
   const overlap = computeFactorOverlap(tickerExposures);
   if (!overlap.length) {
-    console.log("\nno shared high-weight macro factor across enough tickers to flag -- no concentration signal");
+    console.log("\nno shared high-weight macro factor across enough tickers to flag");
     return;
   }
 

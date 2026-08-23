@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth/session";
 import { WatchlistButton } from "@/components/WatchlistButton";
 import type { StockReport } from "@/lib/report/types";
-import { computeFactorOverlap, type TickerFactorExposure } from "@/lib/portfolio-factor-overlap";
+import { computeFactorOverlap, computeSectorConcentration, type TickerFactorExposure, type TickerSector } from "@/lib/portfolio-factor-overlap";
 
 const FACTOR_LABEL: Record<string, string> = {
   interest_rates: "interest rates",
@@ -40,14 +40,25 @@ export default async function WatchlistPage() {
   }
   const factorOverlap = computeFactorOverlap(tickerExposures);
 
+  // Sector Concentration (Phase 5 extension) -- same "watchlist as portfolio proxy" idea as the
+  // factor overlap above, but on Stock.sector: no ResearchReport needed, every watchlist item
+  // already carries its sector from the initial query.
+  const tickerSectors: TickerSector[] = items.map((item) => ({ ticker: item.stock.ticker, sector: item.stock.sector }));
+  const sectorConcentration = computeSectorConcentration(tickerSectors);
+
   return (
     <main className="mx-auto max-w-3xl px-6 py-10">
       <h1 className="text-2xl font-bold">Watchlist</h1>
 
-      {factorOverlap.length > 0 && (
+      {(factorOverlap.length > 0 || sectorConcentration.length > 0) && (
         <div className="mt-6 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-400">
-          <p className="font-medium">Factor concentration</p>
+          <p className="font-medium">Concentration</p>
           <ul className="mt-1 space-y-0.5">
+            {sectorConcentration.map((row) => (
+              <li key={`sector-${row.sector}`}>
+                {row.count} tickers ({row.tickers.join(", ")}) are all {row.sector}
+              </li>
+            ))}
             {factorOverlap.map((row) => (
               <li key={`${row.factor}-${row.direction}`}>
                 {row.count} tickers ({row.tickers.join(", ")}) share a high-weight {row.direction} exposure to{" "}
