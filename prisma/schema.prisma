@@ -190,6 +190,23 @@ model ScoreSnapshot {
   @@index([date])
 }
 
+// Phase 3 roadmap item ("Regime Detection") -- one row per market per refresh day. Market breadth
+// (% of the tracked universe with a positive 3-month price return), not a macro-factor model --
+// see lib/regime.ts's header comment for why (no index/macro data exists in this pipeline yet).
+model MarketRegime {
+  id             String   @id @default(cuid())
+  market         Market
+  date           DateTime
+  breadthPct     Float
+  avgReturn3m    Float
+  classification String   // 'RISK_ON' | 'RISK_OFF' | 'MIXED' -- see lib/regime.ts
+  cohortSize     Int
+  createdAt      DateTime @default(now())
+
+  @@unique([market, date])
+  @@index([market, date])
+}
+
 model WatchlistItem {
   id          String   @id @default(cuid())
   userId      String

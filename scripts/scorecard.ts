@@ -19,8 +19,14 @@ import pg from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../generated/prisma/client";
 import type { StockReport, InvalidationTrigger, TriggerComparator } from "../lib/report/types";
+import type { Market } from "../generated/prisma/client";
 
 const REGRET_THRESHOLD_PCT = 15; // a WAIT that ran up 15%+ with no re-review is worth a second look
+
+// ResearchReport.exchange is the SourceMarket enum (SEC/HKEX/SET/TH_SEC/...); MarketRegime is keyed
+// by the simpler Market enum (TH/US/HK) lib/refresh.ts already scores cohorts by -- map one to the
+// other rather than adding a second market field to ResearchReport just for this lookup.
+const MARKET_BY_EXCHANGE: Record<string, Market> = { SEC: "US", HKEX: "HK", SET: "TH", TH_SEC: "TH" };
 
 const pool = new pg.Pool({ connectionString: process.env.DIRECT_URL });
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
@@ -40,6 +46,9 @@ interface Row {
   regret: boolean;
   triggersTotal: number;
   firedTriggers: Array<InvalidationTrigger & { currentValue: number }>;
+  regimeAtVerdict: string | null;
+  regimeNow: string | null;
+  regimeShifted: boolean;
 }
 
 function comparatorFires(comparator: TriggerComparator, value: number, threshold: number): boolean {
@@ -79,6 +88,22 @@ async function priceOnOrBefore(stockId: string, date: Date): Promise<number | nu
 async function latestPrice(stockId: string): Promise<number | null> {
   const row = await prisma.priceHistory.findFirst({ where: { stockId }, orderBy: { date: "desc" }, select: { close: true } });
   return row?.close ?? null;
+}
+
+/** Same "closest prior row" reasoning as priceOnOrBefore -- MarketRegime is also only written on
+ *  days the refresh job ran. */
+async function regimeOnOrBefore(market: Market, date: Date): Promise<string | null> {
+  const row = await prisma.marketRegime.findFirst({
+    where: { market, date: { lte: date } },
+    orderBy: { date: "desc" },
+    select: { classification: true },
+  });
+  return row?.classification ?? null;
+}
+
+async function latestRegime(market: Market): Promise<string | null> {
+  const row = await prisma.marketRegime.findFirst({ where: { market }, orderBy: { date: "desc" }, select: { classification: true } });
+  return row?.classification ?? null;
 }
 
 async function main() {
@@ -125,6 +150,11 @@ async function main() {
       }
     }
 
+    const market = MARKET_BY_EXCHANGE[r.exchange] ?? null;
+    const regimeAtVerdict = market ? await regimeOnOrBefore(market, r.dataAsOf) : null;
+    const regimeNow = market ? await latestRegime(market) : null;
+    const regimeShifted = regimeAtVerdict !== null && regimeNow !== null && regimeAtVerdict !== regimeNow;
+
     rows.push({
       ticker: r.ticker,
       decision: r.decision,
@@ -137,6 +167,9 @@ async function main() {
       returnPct,
       triggersTotal: triggers.length,
       firedTriggers,
+      regimeAtVerdict,
+      regimeNow,
+      regimeShifted,
       daysSince,
       pastReviewDate,
       regret,
@@ -147,13 +180,14 @@ async function main() {
   const fmtPct = (v: number | null) => (v === null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`);
 
   console.log(
-    "| ticker | decision | conv | dataAsOf | days | price@verdict | current | return | past review | gate | regret | triggers |",
+    "| ticker | decision | conv | dataAsOf | days | price@verdict | current | return | past review | gate | regret | triggers | regime@verdict | regime now |",
   );
-  console.log("|---|---|---|---|---|---|---|---|---|---|---|---|");
+  console.log("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
   for (const row of rows) {
     const triggersCell = row.firedTriggers.length ? `🔴 ${row.firedTriggers.length}/${row.triggersTotal} fired` : `${row.triggersTotal}`;
+    const regimeNowCell = row.regimeShifted ? `🔄 ${row.regimeNow ?? "—"}` : (row.regimeNow ?? "—");
     console.log(
-      `| ${row.ticker} | ${row.decision} | ${row.conviction} | ${row.dataAsOf.toISOString().slice(0, 10)} | ${row.daysSince} | ${fmtPrice(row.priceAtVerdict)} | ${fmtPrice(row.currentPrice)} | ${fmtPct(row.returnPct)} | ${row.pastReviewDate ? "⚠ yes" : "no"} | ${row.gateStatus} | ${row.regret ? "🔴 REGRET" : ""} | ${triggersCell} |`,
+      `| ${row.ticker} | ${row.decision} | ${row.conviction} | ${row.dataAsOf.toISOString().slice(0, 10)} | ${row.daysSince} | ${fmtPrice(row.priceAtVerdict)} | ${fmtPrice(row.currentPrice)} | ${fmtPct(row.returnPct)} | ${row.pastReviewDate ? "⚠ yes" : "no"} | ${row.gateStatus} | ${row.regret ? "🔴 REGRET" : ""} | ${triggersCell} | ${row.regimeAtVerdict ?? "—"} | ${regimeNowCell} |`,
     );
   }
 
@@ -170,6 +204,15 @@ async function main() {
     for (const t of r.firedTriggers) {
       console.log(`  ${r.ticker} (${r.decision} on ${r.dataAsOf.toISOString().slice(0, 10)}): ${t.description} — ${t.metricName}=${t.currentValue.toLocaleString()} ${t.comparator} ${t.threshold.toLocaleString()}`);
     }
+  }
+
+  // Regime Detection (Phase 3) — a shift doesn't invalidate a thesis by itself the way a fired
+  // trigger does; it's a prompt to re-check whether the thesis's assumptions (e.g. "growth stays
+  // strong") still hold under the market conditions that actually developed, not an automatic flag.
+  const shiftedRows = rows.filter((r) => r.regimeShifted);
+  console.log(`\n${shiftedRows.length} report(s) where the market regime has shifted since the verdict (worth a re-look, not automatically wrong):`);
+  for (const r of shiftedRows) {
+    console.log(`  ${r.ticker} (${r.decision} on ${r.dataAsOf.toISOString().slice(0, 10)}): ${r.regimeAtVerdict} -> ${r.regimeNow}`);
   }
 }
 

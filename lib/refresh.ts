@@ -12,8 +12,9 @@ import {
   fetchWeeklyPriceHistory,
   type MarketCode,
 } from "./yahoo";
-import { scoreCohort, type ScorableStock } from "./scoring";
+import { scoreCohort, deriveMetrics, type ScorableStock } from "./scoring";
 import { classifyLynchCategory, computePegRatio } from "./lynch";
+import { classifyRegime } from "./regime";
 import { report } from "./progress";
 
 // Shared by scripts/refresh-universe.ts (CLI/local, own direct-connection Prisma client) and
@@ -254,6 +255,18 @@ async function scoreMarket(prisma: PrismaClient, market: MarketCode): Promise<vo
   const results = scoreCohort(scorable);
   const date = todayForScore();
   const stockById = new Map(stocks.map((s) => [s.id, s]));
+
+  // Regime Detection (Phase 3) -- see lib/regime.ts's header comment for why this is market
+  // breadth, not a macro-factor model. Independent of scoreCohort's percentile-based results
+  // (deriveMetrics() gives the raw return, not a cohort-relative score).
+  const regime = classifyRegime(scorable.map((s) => deriveMetrics(s).return3m));
+  if (regime) {
+    await prisma.marketRegime.upsert({
+      where: { market_date: { market, date } },
+      create: { market, date, ...regime },
+      update: regime,
+    });
+  }
 
   for (const [stockId, result] of results) {
     const stock = stockById.get(stockId)!;
