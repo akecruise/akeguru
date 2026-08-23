@@ -52,7 +52,10 @@ async function main() {
     return;
   }
 
-  const lastReport = await prisma.researchReport.findFirst({ where: { ticker }, orderBy: { dataAsOf: "desc" } });
+  // dataAsOf is a date, not a timestamp -- createdAt breaks same-day-rerun ties in favor of the
+  // actually-most-recent run (found live building scripts/position-sizing.ts: a naive dataAsOf-only
+  // sort can resolve a same-day tie to an already-superseded row).
+  const lastReport = await prisma.researchReport.findFirst({ where: { ticker }, orderBy: [{ dataAsOf: "desc" }, { createdAt: "desc" }] });
   if (!lastReport) {
     console.log(`no prior ResearchReport for ${ticker} -- nothing to compare against, can't detect a change`);
     return;

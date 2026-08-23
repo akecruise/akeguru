@@ -26,8 +26,8 @@ async function main() {
   const tickerFilter = process.argv[2];
   const reports = await prisma.researchReport.findMany({
     where: tickerFilter ? { ticker: tickerFilter } : undefined,
-    orderBy: [{ ticker: "asc" }, { dataAsOf: "asc" }],
-    select: { ticker: true, dataAsOf: true, decision: true, conviction: true },
+    orderBy: [{ ticker: "asc" }, { dataAsOf: "asc" }, { createdAt: "asc" }],
+    select: { ticker: true, dataAsOf: true, createdAt: true, decision: true, conviction: true },
   });
 
   if (!reports.length) {
@@ -38,7 +38,7 @@ async function main() {
   const byTicker = new Map<string, ThesisSnapshot[]>();
   for (const r of reports) {
     const list = byTicker.get(r.ticker) ?? [];
-    list.push({ dataAsOf: r.dataAsOf, decision: r.decision, conviction: r.conviction });
+    list.push({ dataAsOf: r.dataAsOf, createdAt: r.createdAt, decision: r.decision, conviction: r.conviction });
     byTicker.set(r.ticker, list);
   }
 

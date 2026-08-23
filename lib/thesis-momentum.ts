@@ -16,6 +16,7 @@ const DECISION_RANK: Record<DecisionValue, number> = { NO_GO: -1, WAIT: 0, GO: 1
 
 export interface ThesisSnapshot {
   dataAsOf: Date;
+  createdAt: Date; // dataAsOf is a *date*, not a timestamp -- same-day reruns tie on it, createdAt breaks the tie (see computeThesisMomentum's sort)
   decision: DecisionValue;
   conviction: number; // 1-5
 }
@@ -35,7 +36,10 @@ export interface ThesisMomentumResult {
 export function computeThesisMomentum(history: ThesisSnapshot[]): ThesisMomentumResult | null {
   if (history.length < 2) return null;
 
-  const sorted = [...history].sort((a, b) => a.dataAsOf.getTime() - b.dataAsOf.getTime());
+  // dataAsOf-only sort ties on same-day reruns (common while iterating on this pipeline); createdAt
+  // breaks the tie in actual generation order. Found live building lib/position-sizing.ts's
+  // "latest report" query -- a naive dataAsOf-only sort can resolve a same-day tie arbitrarily.
+  const sorted = [...history].sort((a, b) => a.dataAsOf.getTime() - b.dataAsOf.getTime() || a.createdAt.getTime() - b.createdAt.getTime());
   const first = sorted[0];
   const last = sorted[sorted.length - 1];
 
