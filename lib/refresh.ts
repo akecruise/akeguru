@@ -5,6 +5,7 @@ import type { PrismaClient, Prisma } from "../generated/prisma/client";
 import { UNIVERSE_TH } from "./data/universe-th";
 import { UNIVERSE_US } from "./data/universe-us";
 import { UNIVERSE_HK } from "./data/universe-hk";
+import { UNIVERSE_CN_ADR } from "./data/universe-cn-adr";
 import {
   fetchStockQuoteSummary,
   fetchFinancialHistory,
@@ -370,7 +371,11 @@ export async function runRefresh(prisma: PrismaClient): Promise<RefreshResult> {
 
   const tickers: Array<{ ticker: string; market: MarketCode }> = [
     ...UNIVERSE_TH.map((ticker) => ({ ticker, market: "TH" as const })),
+    // China ADRs trade on NASDAQ/NYSE and Yahoo reports them in USD at the ADR level -- real
+    // Market.US tickers for this app's purposes, kept in their own source file (universe-cn-adr.ts)
+    // purely for visibility, not because they need different handling here.
     ...UNIVERSE_US.map((ticker) => ({ ticker, market: "US" as const })),
+    ...UNIVERSE_CN_ADR.map((ticker) => ({ ticker, market: "US" as const })),
     ...UNIVERSE_HK.map((ticker) => ({ ticker, market: "HK" as const })),
   ];
 
