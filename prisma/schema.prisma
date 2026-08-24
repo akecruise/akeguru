@@ -511,3 +511,17 @@ model SocialSentiment {
   @@index([ticker])
   @@index([sentiment])
 }
+
+// Home page "Market Context" strip -- a handful of real index/commodity/FX quotes (S&P/Nasdaq
+// futures, SET, HSI, Gold, USD/THB), fetched via the same yahooFinance client lib/yahoo.ts already
+// uses (yahoo-finance2's quote() on ^SET.BK/^HSI/ES=F/NQ=F/GC=F/THB=X-style symbols). One row per
+// symbol, upserted on each refresh -- not a time series (PriceHistory already covers per-stock
+// history; this is just "what's the market doing right now" for display, not analysis input).
+model MarketQuote {
+  id            String   @id @default(cuid())
+  symbol        String   @unique // the Yahoo symbol, e.g. 'ES=F', '^SET.BK'
+  label         String   // display name, e.g. 'S&P Futures'
+  price         Float
+  changePct     Float    // regularMarketChangePercent, already a percent (e.g. -0.14 = -0.14%)
+  fetchedAt     DateTime @default(now())
+}

@@ -4,8 +4,8 @@ import { getSessionUser } from "@/lib/auth/session";
 import { CardHeading } from "@/components/ui/Card";
 import { StampBadge, Badge } from "@/components/ui/Badge";
 import type { Market } from "../generated/prisma/client";
-import type { StockReport } from "@/lib/report/types";
-import { isRegret } from "@/lib/verdict-stats";
+import type { StockReport, TriggerComparator } from "@/lib/report/types";
+import { isRegret, comparatorFires } from "@/lib/verdict-stats";
 
 const MARKETS: Market[] = ["TH", "US", "HK"];
 
@@ -18,6 +18,7 @@ const REGIME_VARIANT: Record<string, "go" | "wait" | "no_go"> = {
 const GATE_ORDER = [1, 2, 3, 4, 5, 6, 7];
 const RECENT_VERDICTS_LIMIT = 6;
 const RECENT_FACTS_LIMIT = 6;
+const EVENTS_LIMIT = 8;
 
 function timeAgo(date: Date): string {
   const ms = Date.now() - date.getTime();
@@ -27,10 +28,17 @@ function timeAgo(date: Date): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
+interface EventRow {
+  time: Date;
+  kind: "confirm" | "invalidate" | "fact" | "system";
+  ticker?: string;
+  body: string;
+}
+
 export default async function Home() {
   const user = await getSessionUser();
 
-  const [allReports, regimes, latestRefresh, watchlistCount] = await Promise.all([
+  const [allReports, regimes, latestRefresh, watchlistCount, marketQuotes] = await Promise.all([
     // Same "order by ticker, then recency, keep first-per-ticker" dedupe pattern used throughout
     // scripts/{position-sizing,thesis-momentum,read-across}.ts -- dataAsOf is a date not a
     // timestamp, so createdAt breaks same-day-rerun ties.
@@ -45,6 +53,8 @@ export default async function Home() {
     ),
     prisma.refreshLog.findFirst({ orderBy: { startedAt: "desc" } }),
     user ? prisma.watchlistItem.count({ where: { userId: user.id } }) : Promise.resolve(0),
+    // Home page "Market Context" strip -- real index/commodity/FX quotes, see scripts/fetch-market-context.ts.
+    prisma.marketQuote.findMany({ orderBy: { symbol: "asc" } }),
   ]);
 
   const latestByTicker = new Map<string, (typeof allReports)[number]>();
@@ -54,11 +64,14 @@ export default async function Home() {
 
   const waitCount = latestReports.filter((r) => r.decision === "WAIT").length;
 
-  // Sector tags for the verdict feed -- one query for every ticker currently shown, not per-row.
-  const sectorByTicker = new Map(
-    (await prisma.stock.findMany({ where: { ticker: { in: recentVerdicts.map((r) => r.ticker) } }, select: { ticker: true, sector: true } })).map(
-      (s) => [s.ticker, s.sector] as const,
-    ),
+  // Sector + Snowflake score ("Setup") for the verdict feed -- one query for every ticker shown, not per-row.
+  const stocksByTicker = new Map(
+    (
+      await prisma.stock.findMany({
+        where: { ticker: { in: recentVerdicts.map((r) => r.ticker) } },
+        select: { ticker: true, sector: true, latestOverallScore: true },
+      })
+    ).map((s) => [s.ticker, s] as const),
   );
 
   // Gate dots per verdict row -- real QualityGateLog rows for exactly these reports, not fabricated.
@@ -90,8 +103,7 @@ export default async function Home() {
   // Facts changed feed -- most recently ingested FinancialFact rows, deduped to one per
   // (ticker, metricName) so one ingest run doesn't crowd the feed with near-duplicates. Shows a
   // real delta against the prior value for that exact (ticker, metricName) pair when one exists
-  // (e.g. an analyst estimate revision) -- "new" (not a fabricated 0) when it doesn't. Two batched
-  // queries total (not one query per row -- see the gate-logs comment above for why that matters).
+  // (e.g. an analyst estimate revision) -- "new" (not a fabricated 0) when it doesn't.
   const recentFactsRaw = await prisma.financialFact.findMany({
     orderBy: { extractedAt: "desc" },
     take: 30,
@@ -118,15 +130,86 @@ export default async function Home() {
     return { ...f, priorValue: prior && prior.value !== f.value ? prior.value : null };
   });
 
+  // Fired triggers -- real invalidation/confirmation triggers checked against the *latest*
+  // FinancialFact for each ticker, same logic scripts/scorecard.ts uses (lib/verdict-stats.ts),
+  // batched into one query across every report's triggers rather than one query per trigger.
+  interface TriggerCheck {
+    ticker: string;
+    metricName: string;
+    comparator: TriggerComparator;
+    threshold: number;
+    description: string;
+    kind: "confirm" | "invalidate";
+    reportDate: Date;
+  }
+  const triggerChecks: TriggerCheck[] = [];
+  for (const r of latestReports) {
+    const report = r.payload as unknown as StockReport;
+    for (const t of report.verdict?.invalidationTriggers ?? []) triggerChecks.push({ ticker: r.ticker, ...t, kind: "invalidate", reportDate: r.dataAsOf });
+    for (const t of report.verdict?.confirmationTriggers ?? []) triggerChecks.push({ ticker: r.ticker, ...t, kind: "confirm", reportDate: r.dataAsOf });
+  }
+  const triggerPairs = [...new Map(triggerChecks.map((t) => [`${t.ticker}|${t.metricName}`, t])).values()];
+  const triggerFactRows = triggerPairs.length
+    ? await prisma.financialFact.findMany({
+        where: { OR: triggerPairs.map((t) => ({ ticker: t.ticker, metricName: t.metricName })) },
+        orderBy: { extractedAt: "desc" },
+        select: { ticker: true, metricName: true, value: true, extractedAt: true },
+      })
+    : [];
+  const latestValueByPair = new Map<string, { value: number; extractedAt: Date }>();
+  for (const f of triggerFactRows) {
+    const key = `${f.ticker}|${f.metricName}`;
+    if (!latestValueByPair.has(key)) latestValueByPair.set(key, { value: f.value, extractedAt: f.extractedAt });
+  }
+  const firedTriggerEvents: EventRow[] = [];
+  for (const t of triggerChecks) {
+    const latest = latestValueByPair.get(`${t.ticker}|${t.metricName}`);
+    if (latest == null || !comparatorFires(t.comparator, latest.value, t.threshold)) continue;
+    firedTriggerEvents.push({
+      time: latest.extractedAt,
+      kind: t.kind,
+      ticker: t.ticker,
+      body: `${t.description} — ${t.metricName}=${latest.value.toLocaleString()} ${t.comparator} ${t.threshold.toLocaleString()}`,
+    });
+  }
+
+  // Merge into one chronological "Latest Events" feed -- real facts changed, real fired triggers,
+  // real last-refresh summary. No fabricated event types (no mention-acceleration stats, no
+  // trigger-expiry countdowns -- neither exists in this pipeline).
+  const events: EventRow[] = [
+    ...firedTriggerEvents,
+    ...recentFacts.map((f) => ({
+      time: f.extractedAt,
+      kind: "fact" as const,
+      ticker: f.ticker,
+      body: f.priorValue != null ? `${f.metricName}: ${f.priorValue.toLocaleString()} → ${f.value.toLocaleString()}` : `${f.metricName}: ${f.value.toLocaleString()} (ใหม่)`,
+    })),
+    ...(latestRefresh
+      ? [
+          {
+            time: latestRefresh.startedAt,
+            kind: "system" as const,
+            body: `Refresh ${latestRefresh.status.toLowerCase()} — ${latestRefresh.tickersProcessed - latestRefresh.tickersFailed}/${latestRefresh.tickersProcessed} tickers${latestRefresh.tickersFailed > 0 ? `, ${latestRefresh.tickersFailed} failed` : ""}`,
+          },
+        ]
+      : []),
+  ]
+    .sort((a, b) => b.time.getTime() - a.time.getTime())
+    .slice(0, EVENTS_LIMIT);
+
+  const EVENT_TAG: Record<EventRow["kind"], { label: string; cls: string }> = {
+    confirm: { label: "CONFIRM", cls: "text-go bg-go-bg" },
+    invalidate: { label: "INVALIDATE", cls: "text-nogo bg-nogo-bg" },
+    fact: { label: "FACT Δ", cls: "text-accent bg-accent-soft" },
+    system: { label: "SYSTEM", cls: "text-foreground-soft bg-foreground/5" },
+  };
+
   // Scorecard mini -- verdict count + decision mix (real, cheap) + WAIT regret (needs a price
   // comparison per WAIT, same lib/verdict-stats.ts logic scripts/scorecard.ts uses).
   const decisionCounts = { GO: 0, WAIT: 0, NO_GO: 0 } as Record<string, number>;
   for (const r of latestReports) decisionCounts[r.decision] = (decisionCounts[r.decision] ?? 0) + 1;
 
   const waitReports = latestReports.filter((r) => r.decision === "WAIT");
-  // Batched stock lookup (one query, not one per WAIT); priceHistory still needs a per-ticker
-  // "closest date <= this WAIT's own dataAsOf" query since each WAIT has a different cutoff date --
-  // bounded by however many WAITs exist (typically small), not by the full universe.
   const waitStocksByTicker = new Map(
     (await prisma.stock.findMany({ where: { ticker: { in: waitReports.map((r) => r.ticker) } }, select: { ticker: true, id: true, price: true } })).map(
       (s) => [s.ticker, s] as const,
@@ -177,12 +260,6 @@ export default async function Home() {
             </span>
           </div>
           <div className="shrink-0 whitespace-nowrap border-r border-background/15 px-4 py-2.5">
-            <span className="block text-[10.5px] uppercase tracking-wide text-background/50">Runtime</span>
-            <span className="font-semibold">
-              {latestRefresh?.finishedAt ? `${Math.round((latestRefresh.finishedAt.getTime() - latestRefresh.startedAt.getTime()) / 1000 / 60)}m` : "—"}
-            </span>
-          </div>
-          <div className="shrink-0 whitespace-nowrap border-r border-background/15 px-4 py-2.5">
             <span className="block text-[10.5px] uppercase tracking-wide text-background/50">Compound OS Gates</span>
             <span className="font-semibold">
               <span className="text-go">{gatesPassed} pass</span>
@@ -203,16 +280,68 @@ export default async function Home() {
       </div>
 
       <main className="mx-auto max-w-6xl px-6 py-8">
-        <div className="grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
-          {/* Verdicts feed */}
+        {/* Top zone: Market Context + Latest Events */}
+        <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
+          <section className="min-w-0 rounded-xl border border-card-border bg-card">
+            <div className="flex items-baseline justify-between border-b border-card-border px-4 py-3">
+              <CardHeading className="text-foreground-soft">Market Context</CardHeading>
+              <span className="font-mono text-[11px] text-foreground-faint">
+                {marketQuotes[0] ? `updated ${timeAgo(marketQuotes[0].fetchedAt)}` : "npx tsx scripts/fetch-market-context.ts"}
+              </span>
+            </div>
+            {marketQuotes.length === 0 ? (
+              <p className="px-4 py-6 text-sm text-foreground-faint">
+                ยังไม่มีข้อมูล — รัน <code className="rounded bg-foreground/5 px-1">npx tsx scripts/fetch-market-context.ts</code>
+              </p>
+            ) : (
+              <div className="grid grid-cols-2 gap-x-4 px-4 py-2 sm:grid-cols-3">
+                {marketQuotes.map((q) => (
+                  <div key={q.symbol} className="flex items-center justify-between border-b border-card-border py-2 font-mono text-[12.5px] last:border-0 sm:[&:nth-last-child(-n+1)]:border-0">
+                    <span className="font-sans font-medium text-foreground-soft">{q.label}</span>
+                    <span className="flex items-center gap-2">
+                      <span className="text-foreground">{q.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                      <span className={q.changePct >= 0 ? "text-go" : "text-nogo"}>
+                        {q.changePct >= 0 ? "+" : ""}
+                        {q.changePct.toFixed(2)}%
+                      </span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="min-w-0 rounded-xl border border-card-border bg-card">
+            <div className="flex items-baseline justify-between border-b border-card-border px-4 py-3">
+              <CardHeading className="text-foreground-soft">Latest Events</CardHeading>
+            </div>
+            {events.length === 0 ? (
+              <p className="px-4 py-6 text-sm text-foreground-faint">ยังไม่มี event</p>
+            ) : (
+              events.map((e, i) => (
+                <div key={i} className="flex items-baseline gap-2.5 border-b border-card-border px-4 py-2.5 text-[13px] last:border-0">
+                  <span className="shrink-0 font-mono text-[11px] text-foreground-faint">{timeAgo(e.time)}</span>
+                  <span className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-wide ${EVENT_TAG[e.kind].cls}`}>{EVENT_TAG[e.kind].label}</span>
+                  <span className="min-w-0 flex-1 text-foreground-soft">
+                    {e.ticker && <span className="font-mono font-semibold text-accent">{e.ticker} </span>}
+                    {e.body}
+                  </span>
+                </div>
+              ))
+            )}
+          </section>
+        </div>
+
+        <div className="mt-5 grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
+          {/* Trending Verdicts */}
           {/* min-w-0: a grid item defaults to min-width:auto, so the truncated thesis text below
               (which needs a constrained width to truncate at all) would otherwise force this
               track -- and the whole grid -- to expand to the untruncated text's intrinsic width
-              instead of respecting the 1.15fr/0.85fr split. Confirmed live: without this the right
-              column rendered ~8000px off-screen. */}
+              instead of respecting the 1.15fr/0.85fr split. Confirmed live earlier this session:
+              without this the right column rendered ~8000px off-screen. */}
           <section className="min-w-0 rounded-xl border border-card-border bg-card">
             <div className="flex items-baseline justify-between border-b border-card-border px-4 py-3">
-              <CardHeading className="text-foreground-soft">Verdicts ล่าสุด</CardHeading>
+              <CardHeading className="text-foreground-soft">Trending Verdicts</CardHeading>
               <Link href="/screener" className="text-xs font-semibold text-accent">รายงานทั้งหมด »</Link>
             </div>
             {recentVerdicts.length === 0 ? (
@@ -222,17 +351,18 @@ export default async function Home() {
             ) : (
               recentVerdicts.map((r) => {
                 const report = r.payload as unknown as StockReport;
-                const sector = sectorByTicker.get(r.ticker);
+                const stock = stocksByTicker.get(r.ticker);
                 const gates = gateLogsByReport.get(r.id) ?? [];
                 return (
                   <Link key={r.ticker} href={`/stock/${r.ticker}`} className="flex gap-3 border-b border-card-border px-4 py-3 last:border-0 hover:bg-foreground/[0.02]">
                     <StampBadge text={r.decision === "NO_GO" ? "NO-GO" : r.decision} variant={r.decision === "NO_GO" ? "no_go" : (r.decision.toLowerCase() as "go" | "wait")} />
                     <div className="min-w-0 flex-1">
                       <div className="font-mono text-sm font-semibold">
-                        {r.ticker} {sector && <span className="ml-1.5 font-sans text-xs font-normal text-foreground-faint">{sector}</span>}
+                        {r.ticker} {stock?.sector && <span className="ml-1.5 font-sans text-xs font-normal text-foreground-faint">{stock.sector}</span>}
                       </div>
                       <p className="mt-0.5 truncate text-[13.5px] text-foreground-soft">{report.verdict?.thesis}</p>
                       <div className="mt-1 flex flex-wrap items-center gap-3 font-mono text-[11px] text-foreground-faint">
+                        {stock?.latestOverallScore != null && <span>Setup {(stock.latestOverallScore / 10).toFixed(1)}</span>}
                         <span>conviction {r.conviction}/5</span>
                         {gates.length > 0 && (
                           <span className="tracking-widest">
@@ -249,34 +379,6 @@ export default async function Home() {
           </section>
 
           <div className="flex min-w-0 flex-col gap-5">
-            {/* Facts changed */}
-            <section className="rounded-xl border border-card-border bg-card">
-              <div className="flex items-baseline justify-between border-b border-card-border px-4 py-3">
-                <CardHeading className="text-foreground-soft">Facts เปลี่ยนแปลง</CardHeading>
-              </div>
-              {recentFacts.length === 0 ? (
-                <p className="px-4 py-4 text-sm text-foreground-faint">ยังไม่มีข้อมูล</p>
-              ) : (
-                recentFacts.map((f, i) => (
-                  <div key={`${f.ticker}-${f.metricName}`} className="flex gap-3 border-b border-card-border px-4 py-2.5 text-[13.5px] last:border-0">
-                    <span className="font-mono text-xs text-foreground-faint">{i + 1}</span>
-                    <div className="min-w-0 flex-1">
-                      <span className="font-mono font-semibold text-accent">{f.ticker}</span>{" "}
-                      <span className="text-foreground-soft">{f.metricName}</span>{" "}
-                      {f.priorValue != null ? (
-                        <span className={`font-mono font-semibold ${f.value >= f.priorValue ? "text-go" : "text-nogo"}`}>
-                          {f.value >= f.priorValue ? "▲" : "▼"} {f.priorValue.toLocaleString()} → {f.value.toLocaleString()}
-                        </span>
-                      ) : (
-                        <span className="font-mono text-foreground-faint">{f.value.toLocaleString()} (ใหม่)</span>
-                      )}
-                    </div>
-                    <span className="shrink-0 font-mono text-[11px] text-foreground-faint">{timeAgo(f.extractedAt)}</span>
-                  </div>
-                ))
-              )}
-            </section>
-
             {/* Scorecard mini */}
             <section className="rounded-xl border border-card-border bg-card">
               <div className="flex items-baseline justify-between border-b border-card-border px-4 py-3">
@@ -304,6 +406,26 @@ export default async function Home() {
               )}
             </section>
 
+            {/* My akeguru -- real watchlist + WAIT count only. No hit-rate stat: real report
+                history is days old, nowhere near enough time passed to honestly measure whether a
+                GO actually beat anything (see Data Quality/Backtesting discussion). */}
+            {user && (
+              <section className="rounded-xl border border-card-border bg-card p-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft font-mono text-sm font-bold text-accent">
+                    {user.email?.[0]?.toUpperCase() ?? "A"}
+                  </div>
+                  <div className="min-w-0 flex-1 text-[13px] text-foreground-soft">
+                    <span className="font-semibold text-foreground">My akeguru</span> — watchlist {watchlistCount} ตัว
+                    {waitCount > 0 && <> · <span className="text-wait">{waitCount} WAIT</span></>}
+                  </div>
+                  <Link href="/watchlist" className="shrink-0 rounded-md border border-card-border px-3 py-1.5 text-xs font-semibold text-foreground-soft hover:text-foreground">
+                    จัดการ »
+                  </Link>
+                </div>
+              </section>
+            )}
+
             {/* Market regime */}
             <section className="rounded-xl border border-card-border bg-card p-4">
               <CardHeading className="text-foreground-soft">Market Regime</CardHeading>
@@ -317,10 +439,10 @@ export default async function Home() {
           </div>
         </div>
 
-        {/* Themes */}
+        {/* Hot Themes */}
         <section className="mt-5 rounded-xl border border-card-border bg-card">
           <div className="flex items-baseline justify-between border-b border-card-border px-4 py-3">
-            <CardHeading className="text-foreground-soft">Themes</CardHeading>
+            <CardHeading className="text-foreground-soft">Hot Themes</CardHeading>
           </div>
           {themeMap.size === 0 ? (
             <p className="px-4 py-4 text-sm text-foreground-faint">
