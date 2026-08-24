@@ -1,7 +1,9 @@
 import fs from "fs/promises";
 import path from "path";
 import pLimit from "p-limit";
-import type { PrismaClient, Prisma } from "../generated/prisma/client";
+import pg from "pg";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient as PrismaClientCtor, type PrismaClient, type Prisma } from "../generated/prisma/client";
 import { UNIVERSE_TH } from "./data/universe-th";
 import { UNIVERSE_US } from "./data/universe-us";
 import { UNIVERSE_HK } from "./data/universe-hk";
@@ -362,6 +364,43 @@ export interface RefreshResult {
   failed: number;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * The final RefreshLog.update() writes through the SAME PrismaClient/pool that's been open and
+ * under sustained write load for the whole run (every refreshTicker() + scoreMarket() call) --
+ * confirmed live, repeatedly, that this exact call is where a local-dev connection hiccup shows
+ * up (ECONNREFUSED), even though everything before it (the actual fetch + scoring, the work that
+ * matters) already succeeded. Retrying on the SAME pool doesn't help if that pool's connection is
+ * the thing that's actually bad, so each retry opens a genuinely fresh, short-lived client instead
+ * (same DIRECT_URL/DATABASE_URL_UNPOOLED convention scripts/refresh-universe.ts and
+ * app/api/cron/refresh/route.ts already use to build their own long-lived client).
+ *
+ * Deliberately never throws: the real work (Stock/ScoreSnapshot rows) is already committed by the
+ * time this runs, so a log-write failure -- even after every retry -- must not read as "the whole
+ * refresh failed" and trigger someone re-running the entire ~3-5 minute fetch+scoring pass just to
+ * fix one bookkeeping row. Logs the final tallies to the console either way so they're not lost.
+ */
+async function writeRefreshLogFinal(logId: string, data: Prisma.RefreshLogUpdateInput, attempts = 3): Promise<void> {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const pool = new pg.Pool({ connectionString: process.env.DIRECT_URL ?? process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL, max: 1 });
+    const client = new PrismaClientCtor({ adapter: new PrismaPg(pool) });
+    try {
+      await client.refreshLog.update({ where: { id: logId }, data });
+      return;
+    } catch (err) {
+      console.error(`[refresh] RefreshLog final write failed (attempt ${attempt}/${attempts}):`, err instanceof Error ? err.message : err);
+      if (attempt < attempts) await sleep(attempt * 2000); // 2s, 4s -- give a transiently-restarting local dev DB real time to come back
+    } finally {
+      await client.$disconnect().catch(() => {});
+      await pool.end().catch(() => {});
+    }
+  }
+  console.error(`[refresh] RefreshLog ${logId} left unfinalized after ${attempts} attempts -- real data (Stock/ScoreSnapshot) is not affected. Final tallies:`, data);
+}
+
 export async function runRefresh(prisma: PrismaClient): Promise<RefreshResult> {
   const startedAt = new Date();
   const runId = startedAt.toISOString().replace(/[:.]/g, "-");
@@ -447,19 +486,16 @@ export async function runRefresh(prisma: PrismaClient): Promise<RefreshResult> {
         : "SUCCESS";
     const finishedAt = new Date();
 
-    await prisma.refreshLog.update({
-      where: { id: log.id },
-      data: {
-        finishedAt,
-        status,
-        tickersProcessed: processed,
-        tickersFailed: failures.length,
-        errorSummary:
-          failures.length > 0
-            ? (breakerTripped ? "Circuit breaker tripped. " : "") +
-              failures.slice(0, 20).map((f) => `${f.ticker}: ${f.message}`).join("; ")
-            : null,
-      },
+    await writeRefreshLogFinal(log.id, {
+      finishedAt,
+      status,
+      tickersProcessed: processed,
+      tickersFailed: failures.length,
+      errorSummary:
+        failures.length > 0
+          ? (breakerTripped ? "Circuit breaker tripped. " : "") +
+            failures.slice(0, 20).map((f) => `${f.ticker}: ${f.message}`).join("; ")
+          : null,
     });
 
     const result: RefreshResult = { status, processed, failed: failures.length };
