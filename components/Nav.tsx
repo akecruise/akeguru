@@ -14,6 +14,7 @@ export async function Nav() {
         </Link>
         <div className="hidden items-center gap-4 text-sm font-medium text-foreground-soft sm:flex">
           <Link href="/top-selected" className="hover:text-accent">Top Selected</Link>
+          <Link href="/guru-lens" className="hover:text-accent">Guru Lens</Link>
           <Link href="/screener" className="hover:text-accent">Screener</Link>
           <Link href="/watchlist" className="hover:text-accent">Watchlist</Link>
         </div>

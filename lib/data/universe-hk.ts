@@ -21,4 +21,7 @@ export const UNIVERSE_HK: readonly string[] = [
   "1093.HK", "2269.HK", "1177.HK",
   // Transportation / infrastructure
   "0694.HK", // Beijing Capital International Airport
+  // Education
+  "1773.HK", // Tianli International Holdings
+  "6169.HK", // China YuHua Education
 ];

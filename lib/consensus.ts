@@ -60,15 +60,17 @@ export interface ConsensusResult {
 }
 
 /** Share of `sorted` at or below `value`, in [0, 100] -- same definition as lib/scoring.ts's percentileOf. */
-function percentileOf(value: number, sorted: number[]): number {
+export function percentileOf(value: number, sorted: number[]): number {
   let count = 0;
   for (const v of sorted) if (v <= value) count++;
   return (count / sorted.length) * 100;
 }
 
 /** Builds an id -> percentile map for one numeric lens, skipping nulls entirely (they get no
- *  entry, not a 0). `higherIsBetter=false` flips the ranking (e.g. a lower PEG is better). */
-function percentileMap(ids: string[], values: (number | null)[], higherIsBetter: boolean): Map<string, number> {
+ *  entry, not a 0). `higherIsBetter=false` flips the ranking (e.g. a lower PEG is better).
+ *  Exported for lib/guru-lens.ts, which needs percentiles on a couple of dimensions (Snowflake
+ *  Value/Future individually) this module doesn't already expose. */
+export function percentileMap(ids: string[], values: (number | null)[], higherIsBetter: boolean): Map<string, number> {
   const pairs = ids.map((id, i) => ({ id, v: values[i] })).filter((p): p is { id: string; v: number } => p.v != null);
   const oriented = pairs.map((p) => (higherIsBetter ? p.v : -p.v));
   const sorted = [...oriented].sort((a, b) => a - b);
