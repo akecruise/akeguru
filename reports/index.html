@@ -1,19 +1,41 @@
 <!DOCTYPE html>
 <html lang="th">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>akeguru — Reports</title>
-<style>body{margin:0;background:#F6F7F5;font-family:-apple-system,'Segoe UI',sans-serif;padding:24px}
-.wrap{max-width:1000px;margin:0 auto} h1{font-size:22px;color:#182230} .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-top:16px}</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --background:#f6f7f5; --foreground:#182230; --foreground-soft:#4a5568; --foreground-faint:#8a94a3;
+  --card:#ffffff; --card-border:#e3e6e1; --accent:#0e5a63; --accent-soft:#e3f0f1; --accent-foreground:#ffffff;
+  --go:#1b7f4d; --go-bg:#e7f4ec; --wait:#a3690b; --wait-bg:#fbf1dc; --nogo:#b23a2e; --nogo-bg:#f9e9e7;
+  --grade-a:#0e6b3f; --grade-a-bg:#ddf0e4; --grade-b:#4b7a1e; --grade-b-bg:#eaf2dc;
+  --font-sans:'IBM Plex Sans Thai',-apple-system,'Segoe UI',sans-serif; --font-mono:'IBM Plex Mono','SFMono-Regular',Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --background:#0e1116; --foreground:#e8ecf1; --foreground-soft:#a7b1c2; --foreground-faint:#6e7789;
+    --card:#161a21; --card-border:#262c37; --accent:#4fb3a3; --accent-soft:rgba(79,179,163,.14); --accent-foreground:#0a0a0b;
+    --go:#5fcb8b; --go-bg:rgba(95,203,139,.14); --wait:#ebc06b; --wait-bg:rgba(235,192,107,.14); --nogo:#f08a7e; --nogo-bg:rgba(240,138,126,.14);
+    --grade-a:#6bdf9a; --grade-a-bg:rgba(107,223,154,.16); --grade-b:#9dc25e; --grade-b-bg:rgba(157,194,94,.16);
+  }
+}
+body{background:var(--background);color:var(--foreground);font-family:var(--font-sans);}
+body{margin:0;padding:24px}
+.wrap{max-width:1000px;margin:0 auto}
+h1{font-size:22px;font-weight:600;margin:0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-top:16px}
+</style>
 </head>
 <body><div class="wrap">
-  <h1>akeguru — Reports</h1>
+  <h1>ake<span style="color:var(--accent)">guru</span> — Reports</h1>
   <div class="grid">
 <!-- toplist-card:start -->
     <a href="toplist.html" style="text-decoration:none;color:inherit">
-      <div style="background:#fff;border:1px solid #E3E6E1;border-radius:10px;padding:16px;font-family:-apple-system,'Segoe UI',sans-serif">
-        <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:#8A94A3">Toplist</div>
-        <div style="font-size:20px;font-weight:700;color:#182230;margin-top:4px">157 stocks ranked</div>
-        <div style="font-size:12.5px;color:#4A5568;margin-top:4px">#1 2388.HK — consensus 84.6</div>
-        <div style="font-size:11px;color:#8A94A3;margin-top:8px;font-family:Consolas,monospace">Aug 24, 2026, 11:20 AM</div>
+      <div style="background:var(--card);border:1px solid var(--card-border);border-radius:10px;padding:16px">
+        <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--foreground-faint)">Toplist</div>
+        <div style="font-size:20px;font-weight:700;color:var(--foreground);margin-top:4px">157 stocks ranked</div>
+        <div style="font-size:12.5px;color:var(--foreground-soft);margin-top:4px">#1 2388.HK — consensus 84.6</div>
+        <div style="font-size:11px;color:var(--foreground-faint);margin-top:8px;font-family:var(--font-mono)">Aug 24, 2026, 1:24 PM</div>
       </div>
     </a>
   <!-- toplist-card:end -->

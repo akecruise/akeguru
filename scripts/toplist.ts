@@ -124,6 +124,31 @@ function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// Same Google Fonts + palette as the Next.js app's "research terminal" design system
+// (app/globals.css, app/layout.tsx) -- these are standalone static files (no next/font build
+// step), so the fonts load via a plain <link> the way the original design-reference mockups did,
+// and the exact hex/rgba values are copied rather than shared as a single source of truth, since
+// this script has no build pipeline to import a .css file from.
+const FONT_LINK = `<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">`;
+
+const PALETTE_CSS = `:root{
+  --background:#f6f7f5; --foreground:#182230; --foreground-soft:#4a5568; --foreground-faint:#8a94a3;
+  --card:#ffffff; --card-border:#e3e6e1; --accent:#0e5a63; --accent-soft:#e3f0f1; --accent-foreground:#ffffff;
+  --go:#1b7f4d; --go-bg:#e7f4ec; --wait:#a3690b; --wait-bg:#fbf1dc; --nogo:#b23a2e; --nogo-bg:#f9e9e7;
+  --grade-a:#0e6b3f; --grade-a-bg:#ddf0e4; --grade-b:#4b7a1e; --grade-b-bg:#eaf2dc;
+  --font-sans:'IBM Plex Sans Thai',-apple-system,'Segoe UI',sans-serif; --font-mono:'IBM Plex Mono','SFMono-Regular',Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --background:#0e1116; --foreground:#e8ecf1; --foreground-soft:#a7b1c2; --foreground-faint:#6e7789;
+    --card:#161a21; --card-border:#262c37; --accent:#4fb3a3; --accent-soft:rgba(79,179,163,.14); --accent-foreground:#0a0a0b;
+    --go:#5fcb8b; --go-bg:rgba(95,203,139,.14); --wait:#ebc06b; --wait-bg:rgba(235,192,107,.14); --nogo:#f08a7e; --nogo-bg:rgba(240,138,126,.14);
+    --grade-a:#6bdf9a; --grade-a-bg:rgba(107,223,154,.16); --grade-b:#9dc25e; --grade-b-bg:rgba(157,194,94,.16);
+  }
+}
+body{background:var(--background);color:var(--foreground);font-family:var(--font-sans);}`;
+
 function renderToplistHtml(rows: ToplistRow[], isSample: boolean, generatedAt: string): string {
   const jsonPayload = JSON.stringify({ rows, isSample, generatedAt, weights: DEFAULT_TRUST_WEIGHTS });
   return `<!DOCTYPE html>
@@ -132,36 +157,35 @@ function renderToplistHtml(rows: ToplistRow[], isSample: boolean, generatedAt: s
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>akeguru — Toplist</title>
+${FONT_LINK}
 <style>
-  :root{ --paper:#F6F7F5; --card:#FFFFFF; --ink:#182230; --ink-soft:#4A5568; --ink-faint:#8A94A3; --line:#E3E6E1;
-    --brand:#0E5A63; --go:#1B7F4D; --go-bg:#E7F4EC; --wait:#A3690B; --wait-bg:#FBF1DC; --nogo:#B23A2E; --nogo-bg:#F9E9E7;
-    --mono:'Consolas','SFMono-Regular',monospace; --sans:-apple-system,'Segoe UI',sans-serif; }
-  *{box-sizing:border-box} body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px}
+${PALETTE_CSS}
+  *{box-sizing:border-box} body{margin:0;font-size:14px}
   .wrap{max-width:1180px;margin:0 auto;padding:24px 20px 60px}
-  h1{font-size:22px;margin:0 0 4px} .sub{color:var(--ink-soft);font-size:13px;margin:0 0 16px}
+  h1{font-size:22px;margin:0 0 4px;font-weight:600} .sub{color:var(--foreground-soft);font-size:13px;margin:0 0 16px}
   .sample-banner{background:var(--wait-bg);color:var(--wait);border:1px solid var(--wait);border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:16px;font-weight:600}
-  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:13px}
-  th{text-align:center;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);padding:10px 8px;border-bottom:1px solid var(--line)}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--card-border);border-radius:10px;overflow:hidden;font-size:13px}
+  th{text-align:center;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--foreground-faint);padding:10px 8px;border-bottom:1px solid var(--card-border)}
   th.left,td.left{text-align:left}
-  td{padding:10px 8px;text-align:center;border-bottom:1px solid var(--line);vertical-align:middle}
-  tr:last-child td{border-bottom:0} tbody tr:hover td{background:#FAFBF9}
-  .sym{font-family:var(--mono);font-weight:700;color:var(--brand)} .co{font-size:11.5px;color:var(--ink-soft)}
-  .comp{font-family:var(--mono);font-weight:700;background:var(--ink);color:#fff;border-radius:5px;padding:4px 8px;display:inline-block;min-width:42px}
+  td{padding:10px 8px;text-align:center;border-bottom:1px solid var(--card-border);vertical-align:middle}
+  tr:last-child td{border-bottom:0} tbody tr:hover{background:rgba(128,128,128,.06)}
+  .sym{font-family:var(--font-mono);font-weight:700;color:var(--accent)} .co{font-size:11.5px;color:var(--foreground-soft)}
+  .comp{font-family:var(--font-mono);font-weight:700;background:var(--foreground);color:var(--background);border-radius:5px;padding:4px 8px;display:inline-block;min-width:42px}
   .bars{display:flex;gap:2px;justify-content:center}
-  .bar{width:5px;border-radius:1px;background:var(--line)} .bar.on{background:var(--brand)}
-  .stamp{font-family:var(--mono);font-size:10px;font-weight:700;padding:3px 7px;border:1.3px solid;border-radius:4px}
+  .bar{width:5px;border-radius:1px;background:var(--card-border)} .bar.on{background:var(--accent)}
+  .stamp{display:inline-block;font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:.03em;padding:3px 8px;border:1.5px solid;border-radius:4px;transform:rotate(-2deg)}
   .stamp.go{color:var(--go);border-color:var(--go);background:var(--go-bg)}
   .stamp.wait{color:var(--wait);border-color:var(--wait);background:var(--wait-bg)}
   .stamp.no_go{color:var(--nogo);border-color:var(--nogo);background:var(--nogo-bg)}
-  .chg-up{color:var(--go)} .chg-dn{color:var(--nogo)} .muted{color:var(--ink-faint)}
-  .legend{margin-top:14px;font-size:11px;color:var(--ink-faint);font-family:var(--mono)}
-  footer{margin-top:20px;font-size:11.5px;color:var(--ink-faint)}
-  a{color:var(--brand)}
+  .chg-up{color:var(--go)} .chg-dn{color:var(--nogo)} .muted{color:var(--foreground-faint)}
+  .legend{margin-top:14px;font-size:11px;color:var(--foreground-faint);font-family:var(--font-mono)}
+  footer{margin-top:20px;font-size:11.5px;color:var(--foreground-faint)}
+  a{color:var(--accent)}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Toplist — Consensus Ranking</h1>
+  <h1>ake<span style="color:var(--accent)">guru</span> — Toplist <span style="font-family:var(--font-mono);font-size:13px;font-weight:400;color:var(--foreground-faint)">Consensus Ranking</span></h1>
   <p class="sub">Consensus = weighted blend of each stock's percentile rank across Snowflake / Momentum / Magic Formula-style / Neff / Lynch PEG / Turtle confirmation. Generated ${esc(generatedAt)}. <a href="index.html">← dashboard</a></p>
   <div id="banner"></div>
   <table id="tbl">
@@ -217,11 +241,11 @@ function renderCardHtml(rows: ToplistRow[], isSample: boolean, generatedAt: stri
   const top = rows[0];
   return `${CARD_START}
     <a href="toplist.html" style="text-decoration:none;color:inherit">
-      <div style="background:#fff;border:1px solid #E3E6E1;border-radius:10px;padding:16px;font-family:-apple-system,'Segoe UI',sans-serif">
-        <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:#8A94A3">Toplist</div>
-        <div style="font-size:20px;font-weight:700;color:#182230;margin-top:4px">${rows.length} stocks ranked</div>
-        <div style="font-size:12.5px;color:#4A5568;margin-top:4px">${top ? `#1 ${esc(top.ticker)} — consensus ${top.consensusScore?.toFixed(1) ?? "—"}` : "no data yet"}${isSample ? " (sample data)" : ""}</div>
-        <div style="font-size:11px;color:#8A94A3;margin-top:8px;font-family:Consolas,monospace">${esc(generatedAt)}</div>
+      <div style="background:var(--card);border:1px solid var(--card-border);border-radius:10px;padding:16px">
+        <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--foreground-faint)">Toplist</div>
+        <div style="font-size:20px;font-weight:700;color:var(--foreground);margin-top:4px">${rows.length} stocks ranked</div>
+        <div style="font-size:12.5px;color:var(--foreground-soft);margin-top:4px">${top ? `#1 ${esc(top.ticker)} — consensus ${top.consensusScore?.toFixed(1) ?? "—"}` : "no data yet"}${isSample ? " (sample data)" : ""}</div>
+        <div style="font-size:11px;color:var(--foreground-faint);margin-top:8px;font-family:var(--font-mono)">${esc(generatedAt)}</div>
       </div>
     </a>
   ${CARD_END}`;
@@ -247,11 +271,17 @@ function writeIndexHtml(cardHtml: string): void {
   const shell = `<!DOCTYPE html>
 <html lang="th">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>akeguru — Reports</title>
-<style>body{margin:0;background:#F6F7F5;font-family:-apple-system,'Segoe UI',sans-serif;padding:24px}
-.wrap{max-width:1000px;margin:0 auto} h1{font-size:22px;color:#182230} .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-top:16px}</style>
+${FONT_LINK}
+<style>
+${PALETTE_CSS}
+body{margin:0;padding:24px}
+.wrap{max-width:1000px;margin:0 auto}
+h1{font-size:22px;font-weight:600;margin:0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-top:16px}
+</style>
 </head>
 <body><div class="wrap">
-  <h1>akeguru — Reports</h1>
+  <h1>ake<span style="color:var(--accent)">guru</span> — Reports</h1>
   <div class="grid">
 ${cardHtml}
   </div>
