@@ -15,12 +15,11 @@ connection just for that final write, retries 3x with exponential backoff (2s, 4
 throws — a failed log write no longer causes the whole run to read as "failed" or trigger a
 redundant re-run of already-successful work.
 
-**Status at session close**: typecheck/lint clean. A live verification run (`npm run refresh`,
-background job `buzsjb9a8`) was still in progress when the 45-minute session-close budget ran
-out — did not wait for it per explicit instruction not to re-run/chase this further today. Next
-session: check `buzsjb9a8`'s output (or just run `npm run refresh` once) and confirm the final
-`RefreshLog` row reaches `status: SUCCESS/PARTIAL` with `finishedAt` set on the first attempt
-(no manual restart-and-retry needed) — that's the real test of whether this fix works.
+**Status**: confirmed fixed. The verification run (`npm run refresh`, background job `buzsjb9a8`)
+completed after the session-close summary was already sent, so it's recorded here: `status:
+PARTIAL`, `finishedAt` set, `tickersProcessed: 183`, `tickersFailed: 1` (the pre-existing,
+unrelated INTUCH.BK Yahoo-schema issue) — no ECONNREFUSED, no manual restart-and-retry, correct
+on the first attempt. Nothing further needed here.
 
 ## 2. CN ADR universe verification — clean, nothing missing
 
