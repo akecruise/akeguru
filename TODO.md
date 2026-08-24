@@ -26,6 +26,35 @@ on the first attempt. Nothing further needed here.
 All 23 tickers in `lib/data/universe-cn-adr.ts` have a real `Stock` row + real
 `latestOverallScore`. No missing/incomplete tickers to list.
 
+## 3. Macro sector-rotation — small honest slice built, full vision deferred
+
+Built (see README's "Macro rotation" section): `lib/rotation.ts` (`ExitCause`, `ROTATION_MAP`,
+`classifyExitCause()`) + `scripts/fetch-rotation-signal.ts` + `RotationSignal` model. Real signals
+only (yield curve, VIX, defensive-vs-cyclical sector performance), rules-based, `CAPEX_DIGESTION`
+never auto-guessed. Verified live.
+
+**Deferred — the actual full vision from the source research, for whenever it's worth a real
+multi-week push:**
+- Leading-indicator ladder + `ValueChainNode`/`CycleIndicator`/`CycleReading` schema (upstream/
+  mid/coincident/downstream chain mapping with lead-time months per node)
+- Real external data ingestion this app has never touched: Taiwan MOPS monthly revenue
+  (mops.twse.com.tw, legally-mandated by the 10th of each month), Korea customs 20-day export
+  data, SEMI Book-to-Bill/Silicon Shipments, hyperscaler capex guidance aggregation
+- 6 econometric models needing Python (`statsmodels`, `dtaidistance`, `scipy`) via a proposed
+  `stocklens` FastAPI quant service (separate repo, not in this session's reach): Markov
+  regime-switching (Hamilton 1989) for `cyclePhaseAgent`, CCF/Granger for real lead-lag
+  calibration (replacing the hardcoded `leadMonths` guesses), PSY/GSADF explosive-root bubble
+  tests, Bullwhip variance-amplification for double-ordering detection, mid-cycle EPS + CFROI
+  fade for cyclical valuation (avoiding the peak-earnings low-P/E trap), DTW+Mahalanobis for
+  historical-analog matching (`HistoricalAnalog`/`AnalogMatch` schema, seeded with real episodes:
+  telecom/optical bubble 1999-2001, PC/memory bust 1995-96, crypto+memory supercycle 2017-19,
+  COVID shortage-to-bust 2020-23)
+- 3 new agents (`cyclePhaseAgent`, `analogAgent`, `bottleneckAgent`) wired into the Compound OS
+  pipeline ahead of the existing 7, plus new cyclical gates (peak-cycle low-P/E trap, DIO z-score,
+  capex/GM z-score co-spike, >0.8 analog similarity → force human review)
+- Source material's own estimate: 4 weeks, starting with Taiwan monthly revenue (cheapest, most
+  differentiated first step) before the econometric layer
+
 ## Explicitly not done today (out of scope by instruction)
 
 - **20-F/IFRS handling** for CN ADR tickers' Compound OS ingestion (`lib/data/input-sources/sec.ts`

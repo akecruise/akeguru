@@ -547,3 +547,21 @@ model CcassSnapshot {
   @@unique([ticker, asOfDate])
   @@index([ticker])
 }
+
+// Macro-regime sector rotation (lib/rotation.ts, scripts/fetch-rotation-signal.ts) -- a
+// deliberately small slice of a much larger research vision (see lib/rotation.ts's header). One
+// row per run: a rules-based best-guess ExitCause (nullable -- null is a real, honest "couldn't
+// classify confidently," not a missing value) from real signals (yield curve, VIX, defensive-vs-
+// cyclical sector performance), plus the matching ROTATION_MAP phase sectors for direct display.
+model RotationSignal {
+  id            String   @id @default(cuid())
+  asOf          DateTime
+  exitCause     String? // ExitCause | null -- see lib/rotation.ts's ExitCause type
+  confidence    String // 'low' | 'medium'
+  reasoning     String   @db.Text
+  phase1Sectors String[]
+  phase2Sectors String[]
+  evidence      Json // RealRotationSignals -- the real yieldCurveSpread/vix/defensiveVsCyclical3m values
+
+  @@index([asOf])
+}
