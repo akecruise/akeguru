@@ -13,6 +13,7 @@ import { z } from "zod";
 import type { PrismaClient, Prisma } from "../../generated/prisma/client";
 import { validateSection, sectionSchemas, type SectionName } from "../report/schema";
 import { checkGrounding, checkBulletGrounding, checkMoatGrounding, checkFactorSensitivityGrounding, checkClaimGrounding, checkInvalidationTriggers, type RealFact } from "./grounding";
+import { isFactStale, factAgeDays } from "../data-quality";
 import { RateLimitError, FatalProviderError } from "./providers/errors";
 import type { Fundamentals, BulletItem, MoatItem, FactorExposure, ClaimItem, Synthesis } from "../report/types";
 import * as anthropicProvider from "./providers/anthropic";
@@ -130,7 +131,7 @@ export interface RunAgentResult {
 async function loadLatestFacts(prisma: PrismaClient, ticker: string) {
   const rows = await prisma.financialFact.findMany({
     where: { ticker },
-    select: { id: true, metricName: true, value: true, unit: true, period: true, statement: true, extractedAt: true },
+    select: { id: true, metricName: true, value: true, unit: true, period: true, statement: true, extractedAt: true, dataFriction: true },
     orderBy: { extractedAt: "desc" },
   });
   const seen = new Set<string>();
@@ -209,8 +210,16 @@ export async function runAgent(
     throw new Error(`ไม่มี FinancialFact สำหรับ ${ticker} — รัน scripts/ingest.ts ${ticker} ก่อน`);
   }
 
+  // Data Quality Layer (advisory) -- a stale or outlier-flagged fact is still handed to the agent
+  // (this never blocks, see lib/data-quality.ts's header comment), just annotated so the agent can
+  // weigh it appropriately (e.g. not citing a 145-day-old figure as if it were this week's) instead
+  // of silently treating every fact as equally fresh and equally sane.
   const factsBlock = facts
-    .map((f) => `- id=${f.id}  ${f.metricName} = ${f.value} ${f.unit}  (period=${f.period}${f.statement ? `, ${f.statement}` : ""})`)
+    .map((f) => {
+      const frictionTags = [f.dataFriction, isFactStale(f.extractedAt) ? `stale:${factAgeDays(f.extractedAt)}d` : null].filter(Boolean);
+      const frictionNote = frictionTags.length ? `  [⚠ ${frictionTags.join(", ")}]` : "";
+      return `- id=${f.id}  ${f.metricName} = ${f.value} ${f.unit}  (period=${f.period}${f.statement ? `, ${f.statement}` : ""})${frictionNote}`;
+    })
     .join("\n");
 
   // extraContext: prior agent outputs (fundamentals/riskFactors/moat JSON) for a synthesis-style

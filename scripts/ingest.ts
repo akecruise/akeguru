@@ -15,6 +15,7 @@ import { PrismaClient } from "../generated/prisma/client";
 import { ingest, mapYahooFacts, mapYahooEarningsTrendFacts } from "../lib/data/input-sources/router";
 import { STATEMENT_BY_TAG, SPLIT_ADJUSTED_BY_TAG } from "../lib/data/input-sources/sec";
 import { computeAllDerivedMetrics } from "../lib/data/derived-metrics";
+import { detectOutlierFriction } from "../lib/data-quality";
 
 // Standalone CLI script: build its own client against the DIRECT (unpooled) connection,
 // same reasoning as scripts/refresh-universe.ts.
@@ -115,6 +116,36 @@ async function run(ticker: string, dry: boolean) {
   // guard: every fact must have a rawSourceId
   const orphan = facts.filter((f) => !f.rawSourceId);
   if (orphan.length) throw new Error(`${orphan.length} fact row(s) missing rawSourceId — aborting`);
+
+  // ---- Data Quality Layer: outlier detection (Gate 0.5, advisory) ----
+  // Flags a negative valuation multiple (undefined ratio, not a real signal) or a YoY move so
+  // large it's almost certainly a near-zero-base artifact -- written into dataFriction alongside
+  // whatever's already there (e.g. mapYahooEarningsTrendFacts' 'low-coverage'), not overwriting
+  // it. Advisory only: surfaced to agents (lib/agents/runner.ts's factsBlock), never blocks
+  // ingestion or a report. See lib/data-quality.ts's header comment for why outlier detection
+  // lives here (write time, a fixed property of the value) while staleness is checked at read
+  // time instead (a moving target -- see runner.ts).
+  const metricNamesInBatch = [...new Set(facts.map((f) => f.metricName as string))];
+  const priorRows = metricNamesInBatch.length
+    ? await prisma.financialFact.findMany({
+        where: { ticker: r.ticker, metricName: { in: metricNamesInBatch } },
+        orderBy: { extractedAt: "desc" },
+        select: { metricName: true, value: true },
+      })
+    : [];
+  const priorValueByMetric = new Map<string, number>();
+  for (const p of priorRows) if (!priorValueByMetric.has(p.metricName)) priorValueByMetric.set(p.metricName, p.value);
+
+  let outlierCount = 0;
+  for (const f of facts) {
+    const priorValue = priorValueByMetric.get(f.metricName) ?? null;
+    const outlierFriction = detectOutlierFriction(f.metricName, f.value, priorValue);
+    if (outlierFriction) {
+      outlierCount++;
+      f.dataFriction = f.dataFriction ? `${f.dataFriction},${outlierFriction}` : outlierFriction;
+    }
+  }
+  if (outlierCount) console.log(`Data Quality: flagged ${outlierCount} outlier fact(s) (dataFriction) -- see key numbers below`);
 
   const res = await prisma.financialFact.createMany({ data: facts, skipDuplicates: true });
   console.log(`FinancialFact: wrote ${res.count} / ${facts.length} total`);
