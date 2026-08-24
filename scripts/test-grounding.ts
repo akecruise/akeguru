@@ -628,6 +628,7 @@ const MINIMAL_REPORT_WITH_ONE_BAD_RISK: StockReport = {
     reviewDate: "2027-01-01",
   },
   expectationGap: null,
+  turtleSignal: null,
   factorSensitivity: [],
 };
 

@@ -230,6 +230,21 @@ export const ExpectationGapSchema = z.object({
   classification: z.enum(['priced-for-perfection', 'reasonable', 'undervalued-expectations', 'unreliable']),
 });
 
+// ---------- 15 ----------
+// Turtle Trading -- computed by lib/turtle.ts in the orchestrator from real PriceHistory (pure
+// math, not agent output, same reasoning as ExpectationGapSchema above), so this only needs shape
+// validation too.
+export const TurtleBreakoutDirectionSchema = z.enum(['long', 'short', 'none']);
+
+export const TurtleSignalSchema = z.object({
+  system1Breakout: TurtleBreakoutDirectionSchema,
+  system2Breakout: TurtleBreakoutDirectionSchema,
+  confirmed: TurtleBreakoutDirectionSchema,
+  n: z.number().nullable(),
+  suggestedWeightPct: z.number().nullable(),
+  exitLow: z.number().nullable(),
+});
+
 // ---------- root ----------
 export const StockReportSchema = z.object({
   meta: ReportMetaSchema,
@@ -248,6 +263,7 @@ export const StockReportSchema = z.object({
   bears: z.array(ClaimItemSchema).min(2),
   verdict: VerdictSchema,
   expectationGap: ExpectationGapSchema.nullable(),
+  turtleSignal: TurtleSignalSchema.nullable(),
 });
 
 /** schema แยกรายsection — ใช้ตรวจ output ของ agent แต่ละตัว */

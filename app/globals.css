@@ -1,38 +1,87 @@
 @import "tailwindcss";
 
+/* "Research terminal" palette, adopted from the akeguru-dashboard.html design reference --
+   :root holds the light values; the dark media block below re-maps the same roles rather than
+   introducing a second design language. */
 :root {
-  --background: #f6f7f8;
-  --foreground: #171717;
+  --background: #f6f7f5; /* "paper" */
+  --foreground: #182230; /* "ink" */
+  --foreground-soft: #4a5568;
+  --foreground-faint: #8a94a3;
   --card: #ffffff;
-  --card-border: rgba(0, 0, 0, 0.08);
-  --accent: #1f6f64;
+  --card-border: #e3e6e1;
+  --accent: #0e5a63; /* "brand" */
+  --accent-soft: #e3f0f1;
   --accent-foreground: #ffffff;
+
+  --go: #1b7f4d;
+  --go-bg: #e7f4ec;
+  --wait: #a3690b;
+  --wait-bg: #fbf1dc;
+  --nogo: #b23a2e;
+  --nogo-bg: #f9e9e7;
+
+  /* Per-dimension letter grades (Top Selected) -- 4-tier A/B/C/D, distinct from the 3-tier go/wait/nogo
+     verdict scale above. C and D deliberately reuse --wait/--nogo (the mockup's own gC/gD already
+     matched those exact values) -- only A and B needed new tokens. */
+  --grade-a: #0e6b3f;
+  --grade-a-bg: #ddf0e4;
+  --grade-b: #4b7a1e;
+  --grade-b-bg: #eaf2dc;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-foreground-soft: var(--foreground-soft);
+  --color-foreground-faint: var(--foreground-faint);
   --color-card: var(--card);
   --color-card-border: var(--card-border);
   --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
   --color-accent-foreground: var(--accent-foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-go: var(--go);
+  --color-go-bg: var(--go-bg);
+  --color-wait: var(--wait);
+  --color-wait-bg: var(--wait-bg);
+  --color-nogo: var(--nogo);
+  --color-nogo-bg: var(--nogo-bg);
+  --color-grade-a: var(--grade-a);
+  --color-grade-a-bg: var(--grade-a-bg);
+  --color-grade-b: var(--grade-b);
+  --color-grade-b-bg: var(--grade-b-bg);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0b;
-    --foreground: #ededed;
-    --card: #141416;
-    --card-border: rgba(255, 255, 255, 0.08);
+    --background: #0e1116;
+    --foreground: #e8ecf1;
+    --foreground-soft: #a7b1c2;
+    --foreground-faint: #6e7789;
+    --card: #161a21;
+    --card-border: #262c37;
     --accent: #4fb3a3;
+    --accent-soft: rgba(79, 179, 163, 0.14);
     --accent-foreground: #0a0a0b;
+
+    --go: #5fcb8b;
+    --go-bg: rgba(95, 203, 139, 0.14);
+    --wait: #ebc06b;
+    --wait-bg: rgba(235, 192, 107, 0.14);
+    --nogo: #f08a7e;
+    --nogo-bg: rgba(240, 138, 126, 0.14);
+
+    --grade-a: #6bdf9a;
+    --grade-a-bg: rgba(107, 223, 154, 0.16);
+    --grade-b: #9dc25e;
+    --grade-b-bg: rgba(157, 194, 94, 0.16);
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }

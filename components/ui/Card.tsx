@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 
 const ACCENT_BORDER: Record<string, string> = {
-  go: "border-l-4 border-l-emerald-500",
-  wait: "border-l-4 border-l-amber-500",
-  no_go: "border-l-4 border-l-red-500",
+  go: "border-l-4 border-l-go",
+  wait: "border-l-4 border-l-wait",
+  no_go: "border-l-4 border-l-nogo",
   neutral: "",
 };
 
@@ -27,7 +27,7 @@ export function Card({
 
 export function CardHeading({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <h2 className={`text-xs font-semibold uppercase tracking-wide text-black/50 dark:text-white/50 ${className}`}>
+    <h2 className={`text-xs font-semibold uppercase tracking-wide text-foreground-faint ${className}`}>
       {children}
     </h2>
   );

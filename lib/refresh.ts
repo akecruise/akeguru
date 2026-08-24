@@ -161,8 +161,8 @@ async function refreshTicker(
         const date = new Date(Date.UTC(point.date.getUTCFullYear(), point.date.getUTCMonth(), point.date.getUTCDate()));
         await prisma.priceHistory.upsert({
           where: { stockId_date: { stockId: stock.id, date } },
-          create: { stockId: stock.id, date, close: point.close },
-          update: { close: point.close },
+          create: { stockId: stock.id, date, close: point.close, high: point.high, low: point.low },
+          update: { close: point.close, high: point.high, low: point.low },
         });
       }
     } catch (err) {

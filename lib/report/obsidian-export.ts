@@ -13,7 +13,7 @@
  */
 import fs from "fs/promises";
 import path from "path";
-import type { StockReport, MetricGroup, ClaimItem, BulletItem, MoatItem, FactorExposure, EstimateBlock, Exchange, InvalidationTrigger, ExpectationGapResult } from "./types";
+import type { StockReport, MetricGroup, ClaimItem, BulletItem, MoatItem, FactorExposure, EstimateBlock, Exchange, InvalidationTrigger, ExpectationGapResult, TurtleSignalSummary } from "./types";
 import { EXPLICIT_STAGE_YEARS } from "../data/expectation-gap";
 
 const MARKET_FOLDER: Record<Exchange, string> = {
@@ -114,6 +114,30 @@ function renderExpectationGap(gap: ExpectationGapResult | null): string {
   ].join("\n");
 }
 
+const BREAKOUT_LABEL: Record<TurtleSignalSummary["confirmed"], string> = {
+  long: "📈 Confirmed Long — both systems agree",
+  short: "📉 Confirmed Short — both systems agree",
+  none: "No confirmed breakout",
+};
+
+/** Momentum/technical signal, not a fundamental one -- rendered separately from the fundamental
+ *  Expectation Gap section above, same "context, not a verdict input on its own" framing given to
+ *  the synthesis agent in lib/report/orchestrator.ts. */
+function renderTurtleSignal(signal: TurtleSignalSummary | null): string {
+  if (!signal) return "_not computed (not enough weekly price history with high/low yet)_";
+  return [
+    `**${BREAKOUT_LABEL[signal.confirmed]}**`,
+    "",
+    `| | |`,
+    `|---|---|`,
+    `| System 1 (short-term, ~4wk/2wk) | ${signal.system1Breakout} |`,
+    `| System 2 (long-term, ~11wk/4wk) | ${signal.system2Breakout} |`,
+    `| N (ATR, ~4wk) | ${signal.n != null ? signal.n.toFixed(2) : "—"} |`,
+    `| Turtle-style suggested weight | ${signal.suggestedWeightPct != null ? signal.suggestedWeightPct.toFixed(1) + "%" : "—"} |`,
+    `| Trailing exit level (long) | ${signal.exitLow != null ? signal.exitLow.toFixed(2) : "—"} |`,
+  ].join("\n");
+}
+
 function renderEstimates(blocks: EstimateBlock[]): string {
   if (!blocks.length) return "_no consensus estimates available_";
   return blocks
@@ -176,6 +200,7 @@ export function renderStockReportMarkdown(report: StockReport): string {
     ...(meta.themes.length ? [`**Themes:** ${renderThemeLinks(meta.themes)}`] : []),
     `## Thesis\n\n${verdict.thesis}`,
     `## Expectation Gap (reverse DCF)\n\n${renderExpectationGap(report.expectationGap)}`,
+    `## Turtle Signal (Donchian + ATR)\n\n${renderTurtleSignal(report.turtleSignal)}`,
     `## Kill Criteria\n\n${verdict.killCriteria.map((k) => `- ${k}`).join("\n")}`,
     `## Invalidation Triggers\n\n${renderInvalidationTriggers(verdict.invalidationTriggers)}`,
     ...(verdict.confirmationTriggers.length ? [`## Confirmation Triggers (WAIT → GO)\n\n${renderInvalidationTriggers(verdict.confirmationTriggers)}`] : []),

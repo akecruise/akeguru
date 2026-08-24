@@ -96,6 +96,17 @@ export function printReport(report: StockReport): string {
   }
   out.push("");
 
+  const turtle = report.turtleSignal;
+  out.push("Turtle signal (Donchian + ATR):");
+  if (turtle) {
+    out.push(
+      `  confirmed=${turtle.confirmed}  S1=${turtle.system1Breakout}  S2=${turtle.system2Breakout}  N=${turtle.n != null ? turtle.n.toFixed(2) : "—"}  suggested weight=${turtle.suggestedWeightPct != null ? turtle.suggestedWeightPct.toFixed(1) + "%" : "—"}  exit(long)=${turtle.exitLow != null ? turtle.exitLow.toFixed(2) : "—"}`,
+    );
+  } else {
+    out.push("  not computed (not enough weekly price history with high/low yet)");
+  }
+  out.push("");
+
   out.push("Kill criteria:");
   for (const k of verdict.killCriteria) out.push(`  - ${k}`);
   out.push("");

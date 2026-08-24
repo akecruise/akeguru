@@ -19,4 +19,6 @@ export const UNIVERSE_HK: readonly string[] = [
   "0669.HK", "0175.HK", "2333.HK",
   // Healthcare
   "1093.HK", "2269.HK", "1177.HK",
+  // Transportation / infrastructure
+  "0694.HK", // Beijing Capital International Airport
 ];

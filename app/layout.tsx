@@ -1,18 +1,24 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { IBM_Plex_Sans_Thai, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 import { Nav } from "@/components/Nav";
 import { DataFreshnessBadge } from "@/components/DataFreshnessBadge";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+// "Research terminal" identity (per the akeguru-dashboard.html design reference) -- mono for
+// tickers/numbers/meta, a Thai-aware sans for prose, since this app's own agent output is
+// routinely Thai. next/font/google self-hosts + optimizes loading rather than a raw Google Fonts
+// <link> tag, same reasoning Geist already used here.
+const plexSans = IBM_Plex_Sans_Thai({
+  variable: "--font-sans",
+  subsets: ["latin", "thai"],
+  weight: ["400", "500", "600", "700"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const plexMono = IBM_Plex_Mono({
+  variable: "--font-mono",
   subsets: ["latin"],
+  weight: ["400", "500", "600"],
 });
 
 export const metadata: Metadata = {
@@ -24,7 +30,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${plexSans.variable} ${plexMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         <Providers>

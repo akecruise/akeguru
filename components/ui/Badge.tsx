@@ -1,18 +1,39 @@
 export type BadgeVariant = "go" | "wait" | "no_go" | "approved" | "rejected" | "pending" | "neutral";
 
+// go/wait/nogo tokens (app/globals.css) carry both light and dark values, so a single class per
+// variant works in both themes without a separate dark: override -- same reasoning the akeguru-
+// dashboard.html design reference's .chip/.stamp classes use.
 const VARIANT_STYLE: Record<BadgeVariant, string> = {
-  go: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-  wait: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  no_go: "bg-red-500/15 text-red-700 dark:text-red-400",
-  approved: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-  rejected: "bg-red-500/15 text-red-700 dark:text-red-400",
-  pending: "bg-black/10 text-black/60 dark:bg-white/10 dark:text-white/60",
-  neutral: "bg-black/10 text-black/60 dark:bg-white/10 dark:text-white/60",
+  go: "bg-go-bg text-go",
+  wait: "bg-wait-bg text-wait",
+  no_go: "bg-nogo-bg text-nogo",
+  approved: "bg-go-bg text-go",
+  rejected: "bg-nogo-bg text-nogo",
+  pending: "bg-foreground/10 text-foreground-soft",
+  neutral: "bg-foreground/10 text-foreground-soft",
 };
 
 export function Badge({ text, variant = "neutral" }: { text: string; variant?: BadgeVariant }) {
   return (
-    <span className={`whitespace-nowrap rounded px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${VARIANT_STYLE[variant]}`}>
+    <span className={`whitespace-nowrap rounded px-2 py-0.5 font-mono text-xs font-semibold uppercase tracking-wide ${VARIANT_STYLE[variant]}`}>
+      {text}
+    </span>
+  );
+}
+
+/** Rotated "stamp" badge (the akeguru-dashboard.html reference's signature verdict marker) --
+ *  bigger, bordered, and tilted -2deg, meant for a feed row's leading decision marker rather than
+ *  an inline pill like Badge above. Same variant colors, different presentation. */
+export function StampBadge({ text, variant }: { text: string; variant: "go" | "wait" | "no_go" }) {
+  const style = {
+    go: "text-go border-go bg-go-bg",
+    wait: "text-wait border-wait bg-wait-bg",
+    no_go: "text-nogo border-nogo bg-nogo-bg",
+  }[variant];
+  return (
+    <span
+      className={`inline-block min-w-16 shrink-0 -rotate-2 rounded border-[1.5px] px-2.5 py-1 text-center font-mono text-[11px] font-semibold tracking-wide ${style}`}
+    >
       {text}
     </span>
   );

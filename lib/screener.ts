@@ -35,9 +35,11 @@ export const screenerFiltersSchema = z.object({
   // comparable across THB/USD even after FX conversion (see review notes).
   priceMin: z.coerce.number().optional(),
   priceMax: z.coerce.number().optional(),
-  // "rank" is handled entirely by the caller (weighted ranking re-sorts client-of-Prisma) —
-  // accepted here purely so the whole filter object doesn't fail to parse when it's selected.
-  sortBy: z.union([z.enum(SCREENER_SORT_FIELDS), z.literal("rank")]).optional(),
+  // "rank"/"magicFormula"/"neff" are handled entirely by the caller (re-ranked client-of-Prisma,
+  // same reasoning as "rank" -- magicFormula needs two independent rank orderings combined, neff
+  // needs a formula no DB column holds) — accepted here purely so the whole filter object doesn't
+  // fail to parse when one of them is selected.
+  sortBy: z.union([z.enum(SCREENER_SORT_FIELDS), z.literal("rank"), z.literal("magicFormula"), z.literal("neff")]).optional(),
   sortDir: z.enum(["asc", "desc"]).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
 });
@@ -91,9 +93,10 @@ export async function queryScreener(filters: ScreenerFilters) {
   // Sorting by raw price across mixed currencies is the same bug as filtering by it — the
   // sortable fields only ever expose marketCapUsd (never raw marketCap) for this reason,
   // and price sort is only meaningful once callers have scoped to a single market anyway.
-  // "rank" isn't a real column — weighted ranking happens outside this function (see
-  // lib/ranking.ts), so it falls back to the default DB sort here.
-  const sortField = filters.sortBy && filters.sortBy !== "rank" ? filters.sortBy : "marketCapUsd";
+  // "rank"/"magicFormula"/"neff" aren't real columns — re-ranked outside this function (see
+  // lib/ranking.ts, lib/magic-formula.ts, lib/neff.ts), so it falls back to the default DB sort here.
+  const isSpecialSort = filters.sortBy === "rank" || filters.sortBy === "magicFormula" || filters.sortBy === "neff";
+  const sortField = filters.sortBy && !isSpecialSort ? filters.sortBy : "marketCapUsd";
 
   const stocks = await prisma.stock.findMany({
     where,

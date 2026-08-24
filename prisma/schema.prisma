@@ -163,6 +163,12 @@ model PriceHistory {
   stock     Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
   date      DateTime
   close     Float
+  // Added for Turtle Trading (Donchian channels + ATR/"N" -- both need a real high/low, not just
+  // close). Yahoo's chart() response already includes these on every row that populates `close` --
+  // they just weren't captured before. Nullable because rows written before this existed only have
+  // `close`; scripts/backfill-price-ohlc.ts fills them in for already-ingested history.
+  high      Float?
+  low       Float?
   createdAt DateTime @default(now())
 
   @@unique([stockId, date])

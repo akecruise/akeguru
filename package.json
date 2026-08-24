@@ -9,7 +9,8 @@
     "lint": "eslint",
     "postinstall": "prisma generate",
     "refresh": "tsx scripts/refresh-universe.ts",
-    "sync-notes": "tsx scripts/sync-notes.ts"
+    "sync-notes": "tsx scripts/sync-notes.ts",
+    "toplist": "tsx scripts/toplist.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",

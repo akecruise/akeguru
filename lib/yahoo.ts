@@ -213,12 +213,17 @@ export async function fetchFxRateToUsd(market: MarketCode): Promise<number> {
 export interface FetchedPricePoint {
   date: Date;
   close: number;
+  high: number | null;
+  low: number | null;
 }
 
 /**
  * One-time-ish backfill for Momentum scoring: daily PriceHistory rows accumulate one point
  * per refresh, which would take months to produce a usable 12-month return. Weekly closes
  * over ~14 months give enough for 3/6/12-month returns immediately, at a small, bounded payload.
+ *
+ * high/low: added for Turtle Trading (Donchian channels + ATR/"N", lib/turtle.ts) — the same
+ * chart() response already carries them on every row, just unused until now.
  */
 export async function fetchWeeklyPriceHistory(ticker: string): Promise<FetchedPricePoint[]> {
   const period1 = new Date();
@@ -232,5 +237,5 @@ export async function fetchWeeklyPriceHistory(ticker: string): Promise<FetchedPr
 
   return result.quotes
     .filter((q): q is typeof q & { date: Date; close: number } => q.date != null && q.close != null)
-    .map((q) => ({ date: q.date, close: q.close }));
+    .map((q) => ({ date: q.date, close: q.close, high: q.high ?? null, low: q.low ?? null }));
 }

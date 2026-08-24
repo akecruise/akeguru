@@ -39,6 +39,9 @@ yarn-error.log*
 # scripts/run-refresh-task.ps1's per-run logs (Windows Task Scheduler)
 /logs
 
+# scripts/toplist.ts's generated static HTML output -- regenerable, not source
+/reports
+
 # vercel
 .vercel
 

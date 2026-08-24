@@ -10,6 +10,8 @@ import { computeAnnualizedVolatility, suggestPositionSize } from "@/lib/position
 import { Card, CardHeading } from "@/components/ui/Card";
 import { Badge, decisionToVariant, gateStatusToVariant } from "@/components/ui/Badge";
 import { StatTile } from "@/components/ui/StatTile";
+import { AnalyzeButton } from "@/components/AnalyzeButton";
+import { readAnalyzeStatus } from "@/lib/analyze-status";
 
 function fmtNum(v: number | null | undefined, opts?: Intl.NumberFormatOptions): string {
   if (v == null) return "—";
@@ -19,6 +21,13 @@ function fmtNum(v: number | null | undefined, opts?: Intl.NumberFormatOptions): 
 function fmtPct(v: number | null | undefined): string {
   if (v == null) return "—";
   return `${(v * 100).toFixed(2)}%`;
+}
+
+// Extracted out of the page component so the Date.now() call isn't inline in a component body --
+// eslint-plugin-react-hooks's purity rule flags that pattern even in a Server Component (no
+// re-render memoization concerns actually apply here, but the rule can't tell the difference).
+function daysSince(date: Date): number {
+  return Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24));
 }
 
 function fmtMoney(v: number | null | undefined, currency: string | null | undefined): string {
@@ -101,9 +110,7 @@ export default async function StockPage({
   // Last 8 quarters (2 years) is plenty for a trend table — older quarterly rows just clutter it.
   const quarterlyHistory = stock.financialHistory.filter((h) => h.periodType === "QUARTERLY").slice(-8);
 
-  const staleDays = stock.lastFetchedAt
-    ? Math.floor((Date.now() - stock.lastFetchedAt.getTime()) / (1000 * 60 * 60 * 24))
-    : null;
+  const staleDays = stock.lastFetchedAt ? daysSince(stock.lastFetchedAt) : null;
 
   const user = await getSessionUser();
   const watchlistItem = user
@@ -128,6 +135,7 @@ export default async function StockPage({
     select: { payload: true, decision: true, conviction: true, gateStatus: true, dataAsOf: true, obsidianPath: true },
   });
   const researchReport = researchReportRow ? (researchReportRow.payload as unknown as StockReport) : null;
+  const analyzeStatus = readAnalyzeStatus(stock.ticker);
 
   // Position Sizing Model (Phase 5) -- only meaningful for a *current* GO, same "not sizeable" rule
   // as scripts/position-sizing.ts. PriceHistory is weekly, not daily -- see lib/position-sizing.ts's
@@ -204,6 +212,20 @@ export default async function StockPage({
         </Card>
       )}
 
+      {!researchReportRow && user && (
+        <Card className="mt-8">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardHeading>Research Verdict</CardHeading>
+              <p className="mt-1 text-sm text-black/50 dark:text-white/50">
+                No Compound OS report yet — runs the full agent pipeline (ingest + 7 analysis agents, ~10-15 min).
+              </p>
+            </div>
+            <AnalyzeButton ticker={stock.ticker} hasReport={false} initialStatus={analyzeStatus} />
+          </div>
+        </Card>
+      )}
+
       {researchReportRow && researchReport && (
         <Card accent={verdictAccent} className="mt-8">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -220,27 +242,60 @@ export default async function StockPage({
             {researchReportRow.obsidianPath ? ` · exported to Obsidian: ${researchReportRow.obsidianPath}` : ""}
           </p>
 
-          <p className="mt-3 text-sm leading-relaxed text-black/80 dark:text-white/80">{researchReport.verdict.thesis}</p>
-
-          {researchReport.expectationGap && (
-            <p className="mt-3 text-sm text-black/60 dark:text-white/60">
-              <span className="font-medium">Expectation gap (reverse DCF):</span>{" "}
-              {researchReport.expectationGap.classification.replace(/-/g, " ")} — implied{" "}
-              {(researchReport.expectationGap.impliedGrowthRate * 100).toFixed(1)}% vs. achievable{" "}
-              {(researchReport.expectationGap.achievableGrowthRate * 100).toFixed(1)}% growth
-            </p>
+          {user && (
+            <div className="mt-3">
+              <AnalyzeButton ticker={stock.ticker} hasReport={true} initialStatus={analyzeStatus} />
+            </div>
           )}
 
-          {positionSize && (
-            <div className="mt-3 rounded-lg bg-accent/10 p-3 text-sm text-black/80 dark:text-white/80">
-              <span className="font-medium">Suggested position size:</span> {positionSize.suggestedWeightPct.toFixed(1)}% of capital
-              <span className="text-xs text-black/40 dark:text-white/40"> (inverse-volatility sizing, {(positionSize.annualizedVol * 100).toFixed(1)}% annualized vol — a starting point, not an allocator)</span>
-              {sameSectorWatchlistCount > 0 && (
-                <span className="mt-1 block text-xs text-amber-700 dark:text-amber-400">
-                  {sameSectorWatchlistCount} other watchlist ticker{sameSectorWatchlistCount === 1 ? "" : "s"} already in {stock.sector} — worth checking sector concentration before sizing this in.
-                </span>
+          <p className="mt-3 text-sm leading-relaxed text-black/80 dark:text-white/80">{researchReport.verdict.thesis}</p>
+
+          {(researchReport.expectationGap || researchReport.turtleSignal || positionSize) && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {researchReport.expectationGap && (
+                <div className="rounded-lg border border-card-border bg-card/60 px-3 py-2 text-xs">
+                  <div className="uppercase tracking-wide text-black/50 dark:text-white/50">Expectation Gap</div>
+                  <div className="mt-0.5 font-medium text-black/80 dark:text-white/80">
+                    {researchReport.expectationGap.classification.replace(/-/g, " ")}
+                  </div>
+                  <div className="text-black/40 dark:text-white/40">
+                    implied {(researchReport.expectationGap.impliedGrowthRate * 100).toFixed(1)}% vs. achievable{" "}
+                    {(researchReport.expectationGap.achievableGrowthRate * 100).toFixed(1)}%
+                  </div>
+                </div>
+              )}
+              {researchReport.turtleSignal && (
+                <div className="rounded-lg border border-card-border bg-card/60 px-3 py-2 text-xs">
+                  <div className="uppercase tracking-wide text-black/50 dark:text-white/50">Turtle Signal</div>
+                  <div className="mt-0.5">
+                    {researchReport.turtleSignal.confirmed !== "none" ? (
+                      <Badge text={`confirmed ${researchReport.turtleSignal.confirmed}`} variant={researchReport.turtleSignal.confirmed === "long" ? "go" : "no_go"} />
+                    ) : (
+                      <span className="font-medium text-black/80 dark:text-white/80">no confirmed breakout</span>
+                    )}
+                  </div>
+                  {researchReport.turtleSignal.suggestedWeightPct != null && (
+                    <div className="text-black/40 dark:text-white/40">Turtle weight: {researchReport.turtleSignal.suggestedWeightPct.toFixed(1)}% of capital</div>
+                  )}
+                  {researchReport.turtleSignal.exitLow != null && (
+                    <div className="text-black/40 dark:text-white/40">exit (long): {researchReport.turtleSignal.exitLow.toFixed(2)}</div>
+                  )}
+                </div>
+              )}
+              {positionSize && (
+                <div className="rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-xs">
+                  <div className="uppercase tracking-wide text-black/50 dark:text-white/50">Suggested Size</div>
+                  <div className="mt-0.5 font-medium text-black/80 dark:text-white/80">{positionSize.suggestedWeightPct.toFixed(1)}% of capital</div>
+                  <div className="text-black/40 dark:text-white/40">{(positionSize.annualizedVol * 100).toFixed(1)}% ann. vol</div>
+                </div>
               )}
             </div>
+          )}
+
+          {positionSize && sameSectorWatchlistCount > 0 && (
+            <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+              {sameSectorWatchlistCount} other watchlist ticker{sameSectorWatchlistCount === 1 ? "" : "s"} already in {stock.sector} — worth checking sector concentration before sizing this in.
+            </p>
           )}
 
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -265,23 +320,15 @@ export default async function StockPage({
           {(researchReport.moat ?? []).length > 0 && (
             <div className="mt-4">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-black/50 dark:text-white/50">Moat</h3>
-              <ul className="mt-2 space-y-1 text-sm text-black/80 dark:text-white/80">
+              <div className="mt-2 flex flex-wrap gap-1.5">
                 {researchReport.moat.map((m, i) => (
-                  <li key={i}>
-                    <span className="font-medium">{m.title}</span>{" "}
-                    <span className="text-xs text-black/50 dark:text-white/50">({m.strength})</span>
-                  </li>
+                  <span key={i} className="rounded-full border border-card-border bg-card/60 px-2.5 py-1 text-xs text-black/80 dark:text-white/80" title={m.body}>
+                    {m.title} <span className="text-black/40 dark:text-white/40">· {m.strength}</span>
+                  </span>
                 ))}
-              </ul>
+              </div>
             </div>
           )}
-
-          <div className="mt-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-black/50 dark:text-white/50">
-              Invalidation triggers
-            </h3>
-            <TriggerTable triggers={researchReport.verdict.invalidationTriggers ?? []} />
-          </div>
 
           {(() => {
             // confirmationTriggers is a schema field added after some already-persisted
@@ -291,13 +338,23 @@ export default async function StockPage({
             // .length before this fallback was added -- payload is untyped Json in the DB, so the
             // type system can't catch a pre-existing row missing a field added later.
             const confirmationTriggers = researchReport.verdict.confirmationTriggers ?? [];
-            if (researchReport.verdict.decision !== "WAIT" || confirmationTriggers.length === 0) return null;
+            const hasConfirmation = researchReport.verdict.decision === "WAIT" && confirmationTriggers.length > 0;
             return (
-              <div className="mt-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-black/50 dark:text-white/50">
-                  Confirmation triggers (WAIT → GO)
-                </h3>
-                <TriggerTable triggers={confirmationTriggers} />
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div className={hasConfirmation ? "" : "sm:col-span-2"}>
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-black/50 dark:text-white/50">
+                    Invalidation Triggers
+                  </h3>
+                  <TriggerTable triggers={researchReport.verdict.invalidationTriggers ?? []} />
+                </div>
+                {hasConfirmation && (
+                  <div>
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-black/50 dark:text-white/50">
+                      Confirmation Triggers (WAIT → GO)
+                    </h3>
+                    <TriggerTable triggers={confirmationTriggers} />
+                  </div>
+                )}
               </div>
             );
           })()}

@@ -2,6 +2,8 @@ import Link from "next/link";
 import { queryScreener, parseScreenerFilters, listSectors, SCREENER_SORT_FIELDS, LYNCH_CATEGORIES } from "@/lib/screener";
 import { rankStocks, rankingWeightsSchema, DEFAULT_RANKING_WEIGHTS } from "@/lib/ranking";
 import { isLynchBuyCandidate } from "@/lib/lynch";
+import { rankMagicFormula } from "@/lib/magic-formula";
+import { computeNeffRatio, NEFF_ATTRACTIVE_THRESHOLD } from "@/lib/neff";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 
@@ -50,13 +52,21 @@ export default async function ScreenerPage({
 
   const s = (key: string) => (typeof rawParams[key] === "string" ? (rawParams[key] as string) : "");
   const isRanked = s("sortBy") === "rank";
+  const isMagicFormula = s("sortBy") === "magicFormula";
+  const isNeff = s("sortBy") === "neff";
   const weights = rankingWeightsSchema.parse({
     fundamental: s("fundamentalWeight") || undefined,
     momentum: s("momentumWeight") || undefined,
   });
 
   const sectorsPromise = listSectors();
-  let stocks: Array<Awaited<ReturnType<typeof queryScreener>>["stocks"][number] & { rankScore?: number | null }>;
+  let stocks: Array<
+    Awaited<ReturnType<typeof queryScreener>>["stocks"][number] & {
+      rankScore?: number | null;
+      magicFormulaRank?: number | null;
+      neffRatio?: number | null;
+    }
+  >;
   let priceFilterIgnored: boolean;
 
   if (isRanked) {
@@ -65,6 +75,25 @@ export default async function ScreenerPage({
     const candidates = await queryScreener({ ...filters, sortBy: undefined, limit: 200 });
     const ranked = rankStocks(candidates.stocks, weights).slice(0, filters.limit ?? 100);
     stocks = ranked.map((r) => ({ ...r.stock, rankScore: r.rankScore }));
+    priceFilterIgnored = candidates.priceFilterIgnored;
+  } else if (isMagicFormula) {
+    // Same "pull a larger unsorted candidate pool, re-rank here" reasoning as isRanked -- combining
+    // two independent rank orderings (quality, cheapness) isn't a single DB column to sort by.
+    const candidates = await queryScreener({ ...filters, sortBy: undefined, limit: 200 });
+    const ranks = rankMagicFormula(candidates.stocks.map((st) => ({ id: st.id, roa: st.roa, evToEbitda: st.evToEbitda })));
+    const rankById = new Map(ranks.map((r) => [r.id, r.combinedRank]));
+    const stockById = new Map(candidates.stocks.map((st) => [st.id, st]));
+    stocks = ranks
+      .map((r) => ({ ...stockById.get(r.id)!, magicFormulaRank: rankById.get(r.id) }))
+      .slice(0, filters.limit ?? 100);
+    priceFilterIgnored = candidates.priceFilterIgnored;
+  } else if (isNeff) {
+    const candidates = await queryScreener({ ...filters, sortBy: undefined, limit: 200 });
+    stocks = candidates.stocks
+      .map((st) => ({ ...st, neffRatio: computeNeffRatio(st.estEarningsGrowth, st.dividendYield, st.peRatio) }))
+      .filter((st) => st.neffRatio != null)
+      .sort((a, b) => b.neffRatio! - a.neffRatio!)
+      .slice(0, filters.limit ?? 100);
     priceFilterIgnored = candidates.priceFilterIgnored;
   } else {
     const result = await queryScreener(filters);
@@ -189,6 +218,8 @@ export default async function ScreenerPage({
           Sort by
           <select name="sortBy" defaultValue={s("sortBy") || "marketCapUsd"} className={inputClass}>
             <option value="rank">Weighted rank (fundamental + momentum)</option>
+            <option value="magicFormula">Magic Formula-style (quality + cheapness)</option>
+            <option value="neff">Neff Total Return Ratio</option>
             {SCREENER_SORT_FIELDS.map((f) => (
               <option key={f} value={f}>
                 {f}
@@ -259,6 +290,8 @@ export default async function ScreenerPage({
               <th className="py-2 pr-4 font-medium">Lynch</th>
               <th className="py-2 pr-4 font-medium">PEG</th>
               {isRanked && <th className="py-2 pr-4 font-medium">Rank Score</th>}
+              {isMagicFormula && <th className="py-2 pr-4 font-medium">Magic Formula Rank</th>}
+              {isNeff && <th className="py-2 pr-4 font-medium">Neff Ratio</th>}
             </tr>
           </thead>
           <tbody>
@@ -298,6 +331,19 @@ export default async function ScreenerPage({
                 {isRanked && (
                   <td className="py-2 pr-4 font-medium">
                     {stock.rankScore != null ? stock.rankScore.toFixed(1) : "—"}
+                  </td>
+                )}
+                {isMagicFormula && (
+                  <td className="py-2 pr-4 font-medium">
+                    {stock.magicFormulaRank != null ? `#${stock.magicFormulaRank}` : "—"}
+                  </td>
+                )}
+                {isNeff && (
+                  <td className="py-2 pr-4 font-medium">
+                    {stock.neffRatio != null ? stock.neffRatio.toFixed(2) : "—"}
+                    {stock.neffRatio != null && stock.neffRatio >= NEFF_ATTRACTIVE_THRESHOLD && (
+                      <span className="ml-1" title={`Neff: attractive (>= ${NEFF_ATTRACTIVE_THRESHOLD})`}>⭐</span>
+                    )}
                   </td>
                 )}
               </tr>

@@ -24,7 +24,8 @@ import { validateReport, type SectionName } from "./schema";
 import { detectExchange } from "../data/input-sources/router";
 import { computeExpectationGap, computeNormalizedFcf, computeRevenueCagr } from "../data/expectation-gap";
 import { buildValuationGuidance, normalizeSector } from "../sector-profile";
-import type { StockReport, Fundamentals, BulletItem, MoatItem, FactorExposure, ClaimItem, Synthesis, ModelTier } from "./types";
+import { computeTurtleSignal, computeATR, suggestTurtleWeight, ATR_WEEKS, type WeeklyBar } from "../turtle";
+import type { StockReport, Fundamentals, BulletItem, MoatItem, FactorExposure, ClaimItem, Synthesis, ModelTier, TurtleSignalSummary } from "./types";
 
 /**
  * runAgent only returns {ok:false} on a zod-validation failure — a raw provider exception (network
@@ -202,6 +203,33 @@ export async function runFullReport(
         })
       : null;
 
+  // Turtle Trading (lib/turtle.ts) -- pure math from real PriceHistory, computed here (not agent
+  // output) for the same reason expectationGap is: whether a Donchian breakout happened is a
+  // mechanical fact read off price data, not a judgment call, so it's handed to synthesis as
+  // context instead of asked of an LLM. This is a *momentum/technical* signal, not a fundamental
+  // one -- the prompt below is explicit that it's context, not a substitute for MOS/moat/risk.
+  const turtleStock = await prisma.stock.findUnique({ where: { ticker }, select: { id: true, price: true } });
+  let turtleSignal: TurtleSignalSummary | null = null;
+  if (turtleStock) {
+    const priceRows = await prisma.priceHistory.findMany({
+      where: { stockId: turtleStock.id, high: { not: null }, low: { not: null } },
+      orderBy: { date: "asc" },
+      select: { high: true, low: true, close: true },
+    });
+    const bars: WeeklyBar[] = priceRows.map((r) => ({ high: r.high!, low: r.low!, close: r.close }));
+    const signal = computeTurtleSignal(bars);
+    const n = computeATR(bars, ATR_WEEKS);
+    const sized = turtleStock.price != null ? suggestTurtleWeight(turtleStock.price, n) : null;
+    turtleSignal = {
+      system1Breakout: signal.system1 ? (signal.system1.breakoutLong ? "long" : signal.system1.breakoutShort ? "short" : "none") : "none",
+      system2Breakout: signal.system2 ? (signal.system2.breakoutLong ? "long" : signal.system2.breakoutShort ? "short" : "none") : "none",
+      confirmed: signal.confirmedLong ? "long" : signal.confirmedShort ? "short" : "none",
+      n,
+      suggestedWeightPct: sized?.suggestedWeightPct ?? null,
+      exitLow: signal.system2?.exitLow ?? signal.system1?.exitLow ?? null,
+    };
+  }
+
   const synthesisContext =
     buildSynthesisContext(valuationResult.content, riskResult.content, moatResult.ok ? moatResult.content : [], todayIso) +
     `\n\n[expectationGap] (reverse DCF -- pre-computed, ไม่ใช่ agent output, ไม่ต้องมี factId แต่ควรเอาไปใช้ประกอบ thesis/killCriteria/invalidationTriggers ถ้ามีนัยสำคัญ)\n` +
@@ -210,6 +238,8 @@ export async function runFullReport(
       : "null (ข้อมูลไม่พอคำนวณ เช่น FCF ติดลบ หรือไม่มี estimate การเติบโต -- ไม่ต้องพูดถึงในรายงาน)") +
     `\n\n[factorSensitivity] (macro exposure ที่ agent ก่อนหน้าระบุไว้แล้ว -- เอาไปใช้ประกอบ bulls/bears/thesis ถ้ามีนัยสำคัญ)\n` +
     JSON.stringify(factorSensitivityResult.ok ? factorSensitivityResult.content : []) +
+    `\n\n[turtleSignal] (Donchian breakout + ATR -- pre-computed, ไม่ใช่ agent output, ไม่ต้องมี factId. เป็นสัญญาณ momentum/technical ไม่ใช่ fundamental -- ห้ามเอามาแทนที่ MOS/moat/risk ในการตัดสิน แต่ถ้า confirmed เป็น long/short ให้พูดถึงใน thesis สั้นๆ ได้ เช่น "ราคาช่วงนี้มี momentum ยืนยันแนวโน้มขาขึ้นแล้ว" ถ้า confirmed เป็น none ไม่ต้องพูดถึง)\n` +
+    (turtleSignal ? JSON.stringify(turtleSignal) : "null (ข้อมูลราคารายสัปดาห์ไม่พอคำนวณ)") +
     (sectorGuidance ? `\n\n[sectorGuidance] (lib/sector-profile.ts -- metric ไหนเชื่อถือได้/ไม่ได้สำหรับ sector นี้ ก่อนสรุป bulls/bears/thesis/verdict)\n${sectorGuidance}` : "");
   const synthesisResult = await safeRunAgent(prisma, ticker, AGENT_PATHS.synthesis, "synthesis", providerOverride, synthesisContext);
   record("synthesis", synthesisResult);
@@ -261,6 +291,7 @@ export async function runFullReport(
     bears: synthesis.bears,
     verdict: synthesis.verdict,
     expectationGap,
+    turtleSignal,
   };
 
   const validation = validateReport(report);

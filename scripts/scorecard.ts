@@ -18,10 +18,16 @@ import "dotenv/config";
 import pg from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../generated/prisma/client";
-import type { StockReport, InvalidationTrigger, TriggerComparator } from "../lib/report/types";
+import type { StockReport, InvalidationTrigger } from "../lib/report/types";
 import type { Market } from "../generated/prisma/client";
-
-const REGRET_THRESHOLD_PCT = 15; // a WAIT that ran up 15%+ with no re-review is worth a second look
+import {
+  REGRET_THRESHOLD_PCT,
+  comparatorFires,
+  latestFactValue as sharedLatestFactValue,
+  priceOnOrBefore as sharedPriceOnOrBefore,
+  latestPrice as sharedLatestPrice,
+  isRegret,
+} from "../lib/verdict-stats";
 
 // ResearchReport.exchange is the SourceMarket enum (SEC/HKEX/SET/TH_SEC/...); MarketRegime is keyed
 // by the simpler Market enum (TH/US/HK) lib/refresh.ts already scores cohorts by -- map one to the
@@ -55,43 +61,21 @@ interface Row {
   regimeShifted: boolean;
 }
 
-function comparatorFires(comparator: TriggerComparator, value: number, threshold: number): boolean {
-  switch (comparator) {
-    case "lt": return value < threshold;
-    case "lte": return value <= threshold;
-    case "gt": return value > threshold;
-    case "gte": return value >= threshold;
-  }
+/** Latest FinancialFact.value for this exact (ticker, metricName) -- lib/verdict-stats.ts's version
+ *  needs a PrismaClient argument (shared with app code that doesn't have a module-level `prisma`);
+ *  this script already has one at module scope, so this just binds it. */
+function latestFactValue(ticker: string, metricName: string): Promise<number | null> {
+  return sharedLatestFactValue(prisma, ticker, metricName);
 }
 
-/** Latest FinancialFact.value for this exact (ticker, metricName) — mirrors how gate2Consistency's
- *  checkInvalidationTriggers verified the metricName exists at report-time; this is the same lookup
- *  but for "what's it actually reading right now", not "does it exist at all". */
-async function latestFactValue(ticker: string, metricName: string): Promise<number | null> {
-  const row = await prisma.financialFact.findFirst({
-    where: { ticker, metricName },
-    orderBy: { extractedAt: "desc" },
-    select: { value: true },
-  });
-  return row?.value ?? null;
+// priceOnOrBefore/latestPrice: shared with the home page dashboard (lib/verdict-stats.ts), bound
+// to this script's module-level `prisma` the same way latestFactValue above is.
+function priceOnOrBefore(stockId: string, date: Date): Promise<number | null> {
+  return sharedPriceOnOrBefore(prisma, stockId, date);
 }
 
-/** Latest PriceHistory close on or before `date` — PriceHistory is only ever written for trading
- *  days the refresh job actually ran on, so an exact match on `dataAsOf` isn't guaranteed
- *  (weekends, a missed refresh day). Nearest prior close is the honest "price at the time" either
- *  way; there's no real price on a day the market didn't trade. */
-async function priceOnOrBefore(stockId: string, date: Date): Promise<number | null> {
-  const row = await prisma.priceHistory.findFirst({
-    where: { stockId, date: { lte: date } },
-    orderBy: { date: "desc" },
-    select: { close: true },
-  });
-  return row?.close ?? null;
-}
-
-async function latestPrice(stockId: string): Promise<number | null> {
-  const row = await prisma.priceHistory.findFirst({ where: { stockId }, orderBy: { date: "desc" }, select: { close: true } });
-  return row?.close ?? null;
+function latestPrice(stockId: string): Promise<number | null> {
+  return sharedLatestPrice(prisma, stockId);
 }
 
 /** Same "closest prior row" reasoning as priceOnOrBefore -- MarketRegime is also only written on
@@ -143,7 +127,7 @@ async function main() {
     const verdict = (r.payload as unknown as StockReport).verdict;
     const reviewDate = verdict?.reviewDate ?? "?";
     const pastReviewDate = reviewDate !== "?" && now >= new Date(`${reviewDate}T00:00:00Z`);
-    const regret = r.decision === "WAIT" && returnPct !== null && returnPct >= REGRET_THRESHOLD_PCT;
+    const regret = isRegret(r.decision, returnPct);
 
     const triggers = verdict?.invalidationTriggers ?? [];
     const firedTriggers: Row["firedTriggers"] = [];

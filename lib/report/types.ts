@@ -231,6 +231,21 @@ export interface StockReport {
   bears: ClaimItem[];                 // บังคับ >=2
   verdict: Verdict;                   // บังคับ
   expectationGap: ExpectationGapResult | null; // Phase 2 "Expectation Gap Model" — reverse DCF, computed by lib/data/expectation-gap.ts in the orchestrator (pure math, not agent output — no grounding check needed). Null when there isn't enough data to compute it (e.g. negative FCF, no achievable-growth reference).
+  turtleSignal: TurtleSignalSummary | null; // Turtle Trading (lib/turtle.ts) — Donchian breakout + ATR, computed by the orchestrator from real PriceHistory (pure math, not agent output). Null when there isn't enough weekly high/low history yet.
+}
+
+// Turtle Trading (Richard Dennis & William Eckhardt) summary attached to a StockReport — see
+// lib/turtle.ts for the underlying Donchian channel / ATR computation and the trading-days-to-weeks
+// rescaling this pipeline needs (PriceHistory is weekly, not daily).
+export type TurtleBreakoutDirection = 'long' | 'short' | 'none';
+
+export interface TurtleSignalSummary {
+  system1Breakout: TurtleBreakoutDirection; // short-term system (~4wk entry / ~2wk exit)
+  system2Breakout: TurtleBreakoutDirection; // long-term system (~11wk entry / ~4wk exit)
+  confirmed: TurtleBreakoutDirection;       // both systems agree — a stronger signal than either alone
+  n: number | null;                        // ATR ("N"), in price units
+  suggestedWeightPct: number | null;       // Turtle-style unit sizing, re-derived as % of capital (lib/turtle.ts)
+  exitLow: number | null;                  // trailing-stop level for a long position — a technical exit level, distinct from invalidationTriggers' fundamental ones
 }
 
 // Re-exported so callers of this file don't also need to import from lib/data/expectation-gap.ts
