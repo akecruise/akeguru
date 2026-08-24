@@ -525,3 +525,25 @@ model MarketQuote {
   changePct     Float    // regularMarketChangePercent, already a percent (e.g. -0.14 = -0.14%)
   fetchedAt     DateTime @default(now())
 }
+
+// CCASS shareholding concentration (lib/data/input-sources/ccass.ts, scripts/fetch-ccass.ts) --
+// HK-only, real ownership data scraped from hkexnews.hk. Not short interest -- HKEX/CCASS doesn't
+// publish short positions (that's a separate SFC disclosure regime, not covered here). One row
+// per (ticker, asOfDate) rather than a row per CCASS participant (~130/ticker/day, mostly static
+// broker addresses) -- topHolders carries the top 10 as scraped for direct display.
+model CcassSnapshot {
+  id                String   @id @default(cuid())
+  ticker            String
+  asOfDate          DateTime
+  totalShareholding Float // total shares held within CCASS
+  totalParticipants Int
+  totalPctOfIssued  Float // % of issued shares/warrants/units held in CCASS at all
+  totalIssuedShares Float
+  top1PctOfIssued   Float? // largest single participant's % of issued shares
+  top10PctOfIssued  Float? // sum of top-10 participants' % of issued shares -- concentration signal
+  topHolders        Json // CcassHolder[] (top 10), real participant id/name/address/shareholding/pct
+  fetchedAt         DateTime @default(now())
+
+  @@unique([ticker, asOfDate])
+  @@index([ticker])
+}
